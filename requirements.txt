@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+line-bot-sdk
+python-dotenv
+gspread
+google-auth
+google-api-python-client

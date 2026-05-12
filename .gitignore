@@ -1,0 +1,17 @@
+.env
+__pycache__/
+*.pyc
+google_key.json
+
+# 虛擬環境 (絕對要加！裡面檔案超多且不需要上傳)
+venv/
+
+# 工具軟體 (ngrok 不需要放上 GitHub，每個人環境不同)
+ngrok.exe
+
+# Google API 認證後的暫存檔 (雖然目前沒看到，但通常執行後會產生)
+token.json
+credentials.json
+
+# 編輯器設定 (保持個人開發環境獨立)
+.vscode/
