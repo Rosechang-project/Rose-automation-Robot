@@ -38,7 +38,7 @@ def get_user_mapping_sheet():
         sheet.append_row(["Name", "userId", "Calendar_ID", "Status"])
         return sheet
 
-# --- 1. Cron-job 友善接口 (首頁) ---
+# --- 1. Cron-job 友善接口 ---
 @app.get("/")
 async def home():
     return {"status": "小精靈二號機運作中", "uptime": str(datetime.datetime.now(TZ))}
@@ -53,58 +53,45 @@ async def callback(request: Request):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return 'OK'
 
-# --- 2. 定時提醒任務 (早上 8 點 & 晚上 9 點) ---
+# --- 2. 定時提醒任務 (08:00 & 21:00) ---
 def smart_reminder_job():
     now = datetime.datetime.now(TZ)
-    mapping_sheet = get_user_mapping_sheet()
-    users = mapping_sheet.get_all_records()
+    users = get_user_mapping_sheet().get_all_records()
     
-    # 決定提醒邏輯
     if now.hour == 8:
-        # 早上提醒當天下午 (12:00-23:59)
         start_dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
         title = "☀️ 早安報報！今日下午行程："
     elif now.hour == 21:
-        # 晚上提醒隔天上午 (00:00-11:59)
         tomorrow = now + datetime.timedelta(days=1)
         start_dt = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end_dt = tomorrow.replace(hour=11, minute=59, second=59, microsecond=0)
         title = "🌙 晚安報報！明日上午行程預告："
-    else:
-        return
+    else: return
 
     for user in users:
-        u_id = user['userId']
-        c_id = user['Calendar_ID']
+        u_id, c_id = user['userId'], user['Calendar_ID']
         if not c_id or not u_id: continue
-        
         try:
-            events_result = CALENDAR_SERVICE.events().list(
+            events_res = CALENDAR_SERVICE.events().list(
                 calendarId=c_id, timeMin=start_dt.isoformat(), timeMax=end_dt.isoformat(),
                 singleEvents=True, orderBy='startTime'
             ).execute()
-            events = events_result.get('items', [])
-            
+            events = events_res.get('items', [])
             if events:
                 report = f"{title}\n"
                 for e in events:
                     start = e['start'].get('dateTime', e['start'].get('date'))
-                    time_str = start[11:16] if 'T' in start else "全天"
-                    report += f"• {time_str} {e['summary']}\n"
-                
+                    report += f"• {start[11:16] if 'T' in start else '全天'} {e['summary']}\n"
                 with ApiClient(LINE_CONF) as api_client:
-                    line_bot_api = MessagingApi(api_client)
-                    line_bot_api.push_message(PushMessageRequest(to=u_id, messages=[TextMessage(text=report.strip())]))
-        except Exception as e:
-            print(f"提醒失敗 ({user['Name']}): {e}")
+                    MessagingApi(api_client).push_message(PushMessageRequest(to=u_id, messages=[TextMessage(text=report.strip())]))
+        except: pass
 
-# 設定排程
 scheduler = BackgroundScheduler(timezone="Asia/Taipei")
 scheduler.add_job(smart_reminder_job, 'cron', hour='8,21', minute='0')
 scheduler.start()
 
-# --- 3. 新友加入引導 ---
+# --- 3. 新友加入引導 (保留執行長文字) ---
 @HANDLER.add(FollowEvent)
 def handle_follow(event):
     welcome_msg = """歡迎來到 Rose 的待辦事項專區！✨
@@ -116,12 +103,10 @@ def handle_follow(event):
 (例如：我是 Rose)
 
 開通後，我會幫您建立專屬的分頁，並指引您如何連動 Google 日曆喔！"""
-    
     with ApiClient(LINE_CONF) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message(ReplyMessageRequest(reply_token=event.reply_token, messages=[TextMessage(text=welcome_msg)]))
+        MessagingApi(api_client).reply_message(ReplyMessageRequest(reply_token=event.reply_token, messages=[TextMessage(text=welcome_msg)]))
 
-# --- 4. 訊息處理邏輯 ---
+# --- 4. 訊息處理邏輯 (強化防呆版) ---
 @HANDLER.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     reply_token = event.reply_token 
@@ -129,116 +114,129 @@ def handle_message(event):
     u_id = event.source.user_id
     mapping_sheet = get_user_mapping_sheet()
     user_list = mapping_sheet.get_all_records()
-    
-    # 找尋目前使用者
     current_user = next((u for u in user_list if u['userId'] == u_id), None)
 
-    # --- 邏輯 A：註冊流程 ---
+    # A. 註冊邏輯
     if user_msg.startswith("我是"):
         name = user_msg.replace("我是", "").strip()
         if not name: return
-
-        if current_user:
-            reply_text = f"🧐 妳已經註冊過了喔！妳的名字是：{current_user['Name']}"
-        elif any(u['Name'] == name for u in user_list):
-            reply_text = f"❌ 抱歉，名字「{name}」已被使用，請換個稱呼吧！"
+        if current_user: reply_text = f"🧐 妳已經註冊過了喔！妳的名字是：{current_user['Name']}"
+        elif any(u['Name'] == name for u in user_list): reply_text = f"❌ 抱歉，名字「{name}」已被使用，請換個稱呼吧！"
         else:
             try:
-                # 自動創表
                 new_ws = SPREADSHET.add_worksheet(title=name, rows="100", cols="5")
                 new_ws.append_row(["時間", "事項", "狀態"])
                 mapping_sheet.append_row([name, u_id, "", "待設定日曆"])
                 reply_text = f"🎉 {name}，歡迎加入！已為您開通分頁。\n\n最後一步：請回傳您的 Google 日曆 ID (通常是您的 Gmail) 給我，並記得把日曆「共用」給我的金鑰 Email 喔！"
-            except Exception as e:
-                reply_text = f"創表失敗：{e}"
+            except Exception as e: reply_text = f"創表失敗：{e}"
         
-    # --- 邏輯 B：設定日曆 ID ---
+    # B. 設定日曆 ID
     elif "@" in user_msg and "." in user_msg:
-        if not current_user:
-            reply_text = "請先輸入「我是 [姓名]」完成註冊喔！"
+        if not current_user: reply_text = "請先輸入「我是 [姓名]」完成註冊喔！"
         else:
-            # 找到該使用者在那一行 (row)
-            all_uids = mapping_sheet.col_values(2)
-            row_idx = all_uids.index(u_id) + 1
+            row_idx = mapping_sheet.col_values(2).index(u_id) + 1
             mapping_sheet.update_cell(row_idx, 3, user_msg)
             mapping_sheet.update_cell(row_idx, 4, "已開通")
             reply_text = f"✅ 日曆設定成功！目前的日曆 ID：{user_msg}\n我會在每日 08:00 與 21:00 為您巡邏行程。"
 
-    # --- 邏輯 C：雜事與日曆功能 (需先註冊) ---
+    # C. 功能邏輯 (已註冊使用者)
     elif current_user:
-        user_name = current_user['Name']
-        user_calendar = current_user['Calendar_ID']
+        user_name, user_calendar = current_user['Name'], current_user['Calendar_ID']
         u_worksheet = SPREADSHET.worksheet(user_name)
 
-        # 這裡放入妳原本的新增、查詢、刪除、預約邏輯...
-        # 記得把原本程式碼中的 `worksheet` 改成 `u_worksheet`
-        # `MY_CALENDAR_ID` 改成 `user_calendar`
-        
-        # --- (以下簡化示範「新增」邏輯，其餘依此類推) ---
-        if user_msg.startswith("新增"):
+        # 1. 智慧預約 (支援 5/20, 0520 等格式)
+        if user_msg.startswith("預約"):
+            try:
+                parts = re.split(r'\s+', user_msg)
+                if len(parts) >= 4:
+                    date_raw, time_raw, task_name = parts[1], parts[2], " ".join(parts[3:])
+                    date_clean = date_raw.replace("/", "").replace("-", "").zfill(4) # 轉成 0520
+                    start_dt = TZ.localize(datetime.datetime.strptime(f"{datetime.datetime.now(TZ).year}-{date_clean[:2]}-{date_clean[2:]} {time_raw}", "%Y-%m-%d %H:%M"))
+                    
+                    if not user_calendar: reply_text = "❌ 尚未設定日曆 ID，請先回傳 Gmail 帳號。"
+                    else:
+                        remind_min = 30
+                        if start_dt.hour < 12: remind_min = int((start_dt - (start_dt - datetime.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
+                        else: remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
+                        
+                        body = {'summary': task_name, 'start': {'dateTime': start_dt.isoformat()}, 'end': {'dateTime': (start_dt + datetime.timedelta(hours=1)).isoformat()}, 'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': max(1, remind_min)}]}}
+                        CALENDAR_SERVICE.events().insert(calendarId=user_calendar, body=body).execute()
+                        reply_text = f"📅 {user_name} 預約成功：{task_name}"
+                else: reply_text = "❌ 格式：預約 5/20 11:00 去機場"
+            except Exception as e: reply_text = f"預約失敗：{e}"
+
+        # 2. 新增雜事 (嚴格開頭，防止誤入)
+        elif user_msg.startswith("新增"):
             content = user_msg.replace("新增", "").strip()
             tasks = re.split(r'[，,]+', content)
-            now_str = datetime.datetime.now(TZ).strftime("%m/%d %H:%M")
             for t in tasks:
-                if t.strip(): u_worksheet.append_row([now_str, t.strip(), "未完成"])
+                if t.strip(): u_worksheet.append_row([datetime.datetime.now(TZ).strftime("%m/%d %H:%M"), t.strip(), "未完成"])
             reply_text = f"✅ 已為 {user_name} 記錄雜事。"
-        
+
+        # 3. 查詢行程 (保留執行長文字)
         elif user_msg == "查詢":
             try:
                 combined_reply = f"🌹 {user_name} 的最新情報：\n"
-                
-                # 1. 處理該使用者的試算表雜事
-                all_rows = u_worksheet.get_all_values()
-                sheet_tasks = []
-                count = 0
-                for idx, row in enumerate(all_rows):
-                    if idx == 0: continue 
-                    if len(row) > 2 and row[2] == "未完成":
-                        count += 1
-                        sheet_tasks.append(f"{count}. ⏳ {row[1]}")
-                
+                rows = u_worksheet.get_all_values()
+                sheet_tasks = [f"{i}. ⏳ {r[1]}" for i, r in enumerate(rows) if i > 0 and len(r) > 2 and r[2] == "未完成"]
                 combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) if sheet_tasks else "目前沒有雜事喔！")
-
-                # 2. 處理該使用者的日曆行程
+                
                 if user_calendar:
-                    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
-                    events_result = CALENDAR_SERVICE.events().list(
-                        calendarId=user_calendar, timeMin=now,
-                        maxResults=5, singleEvents=True, orderBy='startTime'
-                    ).execute()
-                    events = events_result.get('items', [])
-
+                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, timeMin=now_iso, maxResults=5, singleEvents=True, orderBy='startTime').execute().get('items', [])
                     combined_reply += "\n\n📅 【近期行程】\n"
-                    if not events:
-                        combined_reply += "近期沒有排定行程。"
+                    if not events: combined_reply += "近期沒有排定行程。"
                     else:
-                        for event in events:
-                            start = event['start'].get('dateTime', event['start'].get('date'))
-                            dt = datetime.datetime.strptime(start[:16], "%Y-%m-%dT%H:%M")
-                            combined_reply += f"• {dt.strftime('%m/%d %H:%M')} {event['summary']}\n"
-                else:
-                    combined_reply += "\n\n📅 【日曆狀態】\n尚未設定日曆 ID，請回傳您的 Gmail 帳號來開通！"
-
-                # --- 💡 加上貼心指令教學 ---
-                combined_reply += "\n" + "-"*15 + "\n"
-                combined_reply += "💡 指令小幫手：\n"
-                combined_reply += "🗑️ 刪除雜事：刪除 [編號]\n"
-                combined_reply += "❌ 取消行程：取消 [關鍵字]"
-
+                        for e in events:
+                            s = e['start'].get('dateTime', e['start'].get('date'))
+                            combined_reply += f"• {s[5:10]} {s[11:16]} {e['summary']}\n"
+                else: combined_reply += "\n\n📅 【日曆狀態】\n尚未設定日曆 ID。"
+                
+                combined_reply += f"\n{'-'*15}\n💡 指令小幫手：\n🗑️ 刪除雜事：刪除 [編號]\n❌ 取消行程：取消 [關鍵字]"
                 reply_text = combined_reply
-            except Exception as e:
-                reply_text = f"查詢失敗：{str(e)}"
-        
+            except Exception as e: reply_text = f"查詢失敗：{e}"
+
+        # 4. 完成 / 刪除
+        elif any(user_msg.startswith(act) for act in ["完成", "刪除"]):
+            action = "完成" if "完成" in user_msg else "刪除"
+            try:
+                num = int(re.search(r'\d+', user_msg).group())
+                rows = u_worksheet.get_all_values()
+                target_idx, count = -1, 0
+                for i, r in enumerate(rows):
+                    if i > 0 and len(r) > 2 and r[2] == "未完成":
+                        count += 1
+                        if count == num: target_idx = i + 1; break
+                if target_idx != -1:
+                    task = u_worksheet.cell(target_idx, 2).value
+                    if action == "完成": u_worksheet.update_cell(target_idx, 3, "已完成")
+                    else: u_worksheet.delete_rows(target_idx)
+                    reply_text = f"✅ 已{action}：{task}"
+                else: reply_text = f"🧐 找不到編號 {num}"
+            except: reply_text = f"❌ 請輸入數字，例如：{action} 1"
+
+        # 5. 取消行程 (日曆)
+        elif user_msg.startswith("取消"):
+            keyword = user_msg.replace("取消", "").strip()
+            if not keyword: reply_text = "❌ 請輸入關鍵字，例如：取消 去機場"
+            else:
+                try:
+                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, q=keyword, timeMin=datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')).execute().get('items', [])
+                    if events:
+                        CALENDAR_SERVICE.events().delete(calendarId=user_calendar, eventId=events[0]['id']).execute()
+                        reply_text = f"🗑️ 已從日曆取消：{events[0]['summary']}"
+                    else: reply_text = f"🧐 找不到「{keyword}」行程。"
+                except Exception as e: reply_text = f"取消失敗：{e}"
+
+        # 6. 預設說明
         else:
             reply_text = f"{user_name} Hi！我是你的待辦事項小精靈。輸入「查詢」看清單，或是「新增 [事項]」來記錄雜事。"
             
     else:
         reply_text = "歡迎初次見面！請先輸入「我是 [您的姓名]」來開始使用喔！"
 
-    # 回覆訊息
     with ApiClient(LINE_CONF) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        line_bot_api.reply_message(ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=reply_text)]))
+        MessagingApi(api_client).reply_message(ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=reply_text)]))
 
 if __name__ == "__main__":
     import uvicorn
