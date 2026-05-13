@@ -107,13 +107,13 @@ scheduler.start()
 # --- 3. 新友加入引導 ---
 @HANDLER.add(FollowEvent)
 def handle_follow(event):
-    welcome_msg = """歡迎來到 Rose 的自動化小天地！✨
+    welcome_msg = """歡迎來到 Rose 的待辦事項專區！✨
 
-我是妳的專屬秘書，能幫妳管理多人的雜事與日曆。
+我是你的小精靈，能幫你管理多人的雜事與日曆。
 
 🔑 【開通第一步】
 請先輸入：我是 [您的姓名]
-(例如：我是 Ace)
+(例如：我是 Rose)
 
 開通後，我會幫您建立專屬的分頁，並指引您如何連動 Google 日曆喔！"""
     
@@ -141,7 +141,7 @@ def handle_message(event):
         if current_user:
             reply_text = f"🧐 妳已經註冊過了喔！妳的名字是：{current_user['Name']}"
         elif any(u['Name'] == name for u in user_list):
-            reply_text = f"❌ 抱歉，名字「{name}」已被佔用，請換個稱呼吧！"
+            reply_text = f"❌ 抱歉，名字「{name}」已被使用，請換個稱呼吧！"
         else:
             try:
                 # 自動創表
@@ -184,11 +184,53 @@ def handle_message(event):
             reply_text = f"✅ 已為 {user_name} 記錄雜事。"
         
         elif user_msg == "查詢":
-            # 妳原本強大的查詢邏輯... (記得切換 user_calendar)
-            reply_text = f"這是 {user_name} 的查詢結果..." # 實作細節略，同妳原本代碼
+            try:
+                combined_reply = f"🌹 {user_name} 的最新情報：\n"
+                
+                # 1. 處理該使用者的試算表雜事
+                all_rows = u_worksheet.get_all_values()
+                sheet_tasks = []
+                count = 0
+                for idx, row in enumerate(all_rows):
+                    if idx == 0: continue 
+                    if len(row) > 2 and row[2] == "未完成":
+                        count += 1
+                        sheet_tasks.append(f"{count}. ⏳ {row[1]}")
+                
+                combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) if sheet_tasks else "目前沒有雜事喔！")
+
+                # 2. 處理該使用者的日曆行程
+                if user_calendar:
+                    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                    events_result = CALENDAR_SERVICE.events().list(
+                        calendarId=user_calendar, timeMin=now,
+                        maxResults=5, singleEvents=True, orderBy='startTime'
+                    ).execute()
+                    events = events_result.get('items', [])
+
+                    combined_reply += "\n\n📅 【近期行程】\n"
+                    if not events:
+                        combined_reply += "近期沒有排定行程。"
+                    else:
+                        for event in events:
+                            start = event['start'].get('dateTime', event['start'].get('date'))
+                            dt = datetime.datetime.strptime(start[:16], "%Y-%m-%dT%H:%M")
+                            combined_reply += f"• {dt.strftime('%m/%d %H:%M')} {event['summary']}\n"
+                else:
+                    combined_reply += "\n\n📅 【日曆狀態】\n尚未設定日曆 ID，請回傳您的 Gmail 帳號來開通！"
+
+                # --- 💡 加上貼心指令教學 ---
+                combined_reply += "\n" + "-"*15 + "\n"
+                combined_reply += "💡 指令小幫手：\n"
+                combined_reply += "🗑️ 刪除雜事：刪除 [編號]\n"
+                combined_reply += "❌ 取消行程：取消 [關鍵字]"
+
+                reply_text = combined_reply
+            except Exception as e:
+                reply_text = f"查詢失敗：{str(e)}"
         
         else:
-            reply_text = f"{user_name} 妳好！我是妳的雙刀流秘書。輸入「查詢」看清單，或是「新增 [事項]」來記錄雜事。"
+            reply_text = f"{user_name} Hi！我是你的待辦事項小精靈。輸入「查詢」看清單，或是「新增 [事項]」來記錄雜事。"
             
     else:
         reply_text = "歡迎初次見面！請先輸入「我是 [您的姓名]」來開始使用喔！"
