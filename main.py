@@ -178,7 +178,14 @@ def handle_message(event):
             try:
                 combined_reply = f"🌹 {user_name} 的最新情報：\n"
                 rows = u_worksheet.get_all_values()
-                sheet_tasks = [f"{i}. ⏳ {r[1]}" for i, r in enumerate(rows) if i > 0 and len(r) > 2 and r[2] == "未完成"]
+                sheet_tasks = []
+                display_count = 0  # 這是顯示用的編號
+                for i, row in enumerate(rows):
+                    if i == 0: continue # 跳過標題列
+                    if len(row) > 2 and row[2] == "未完成":
+                        display_count += 1 # 只有找到未完成時，編號才加 1
+                        sheet_tasks.append(f"{display_count}. ⏳ {row[1]}")
+                
                 combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) if sheet_tasks else "目前沒有雜事喔！")
                 
                 if user_calendar:
