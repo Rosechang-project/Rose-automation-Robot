@@ -9,12 +9,10 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, PushMessageRequest
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from dotenv import load_dotenv
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
 from apscheduler.schedulers.background import BackgroundScheduler
 from datetime import datetime  # 全域統一使用類別
 
-# 🔑 完美召喚 Google Sheets 部門的所有核心功能
+# 🔑 完美召喚 Google Sheets 部門
 from services.sheet_service import (
     get_user_mapping_sheet, 
     create_user_worksheet, 
@@ -24,21 +22,23 @@ from services.sheet_service import (
     update_or_delete_todo
 )
 
+# 🔑 完美召喚 Google Calendar 部門
+from services.calendar_service import (
+    get_calendar_service,
+    insert_calendar_event,
+    delete_calendar_event
+)
+
 load_dotenv()
 app = FastAPI()
 
 # --- 基礎設定 ---
 LINE_CONF = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 HANDLER = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
-SCOPE = ["https://www.googleapis.com/auth/calendar"]
-
-GOOGLE_KEY_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', 'google_key.json')
-CREDS = Credentials.from_service_account_file(GOOGLE_KEY_PATH, scopes=SCOPE)
-
 TZ = pytz.timezone('Asia/Taipei')
 
-# --- Google 日曆服務初始化 (試算表初始化已全部搬走) ---
-CALENDAR_SERVICE = build('calendar', 'v3', credentials=CREDS)
+# 透過轉接頭拿到日曆服務實例，供內建排程使用
+CALENDAR_SERVICE = get_calendar_service()
 
 
 # --- 1. Cron-job 友善接口 ---
@@ -65,7 +65,7 @@ def smart_reminder_job():
     if now.hour == 8:
         start_dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        title = "☀️ 早安報報！今日下午行程："
+        title = "☀️ 早安報報！今日 afternoon 行程："
     elif now.hour == 21:
         tomorrow = now + dt_module.timedelta(days=1)
         start_dt = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -119,7 +119,6 @@ def handle_message(event):
     user_msg = event.message.text.strip()
     u_id = event.source.user_id
     
-    # 透過封裝好的服務取得用戶清單
     user_list = get_user_mapping_sheet().get_all_records()
     current_user = next((u for u in user_list if u['userId'] == u_id), None)
 
@@ -133,18 +132,15 @@ def handle_message(event):
             reply_text = f"❌ 抱歉，名字「{name}」已被使用，請換個稱呼吧！"
         else:
             try:
-                # 🗃️ 呼叫搬家後的註冊分頁建立服務
                 create_user_worksheet(name, u_id)
                 reply_text = f"🎉 {name}，歡迎加入！已為您開通分頁。\n\n最後一步：請回傳您的 Google 日曆 ID (通常是您的 Gmail) 給我，並記得把日曆「共用」給我的金鑰 Email 喔！"
-            except Exception as e: 
-                reply_text = f"創表失敗：{e}"
+            except Exception as e: reply_text = f"創表失敗：{e}"
         
     # B. 設定日曆 ID
     elif "@" in user_msg and "." in user_msg:
         if not current_user: 
             reply_text = "請先輸入「我是 [姓名]」完成註冊喔！"
         else:
-            # 🗃️ 呼叫搬家後的日曆欄位更新服務
             update_user_calendar(u_id, user_msg)
             reply_text = f"✅ 日曆設定成功！目前的日曆 ID：{user_msg}\n我會在每日 08:00 與 21:00 為您巡邏行程。"
 
@@ -189,14 +185,9 @@ def handle_message(event):
                             remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
                         
                         current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
-                        body = {
-                            'summary': task_name,
-                            'description': f"=======================\n📅 建立時間：{current_time_str} (台北時間)\n📝 備註事項：透過 LINE 小精靈自動同步\n=======================",
-                            'start': {'dateTime': start_dt.isoformat(), 'timeZone': 'Asia/Taipei'},
-                            'end': {'dateTime': end_dt.isoformat(), 'timeZone': 'Asia/Taipei'},
-                            'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': max(1, remind_min)}]}
-                        }
-                        CALENDAR_SERVICE.events().insert(calendarId=user_calendar, body=body).execute()
+                        
+                        # 📅 呼叫搬家後的日曆寫入服務
+                        insert_calendar_event(user_calendar, task_name, start_dt, end_dt, remind_min, current_time_str)
                         reply_text = f"📅 {user_name} 預約成功：{task_name}"
             except Exception as e: 
                 reply_text = f"❌ 系統錯誤：{e}"
@@ -210,16 +201,13 @@ def handle_message(event):
                 tasks = re.split(r'[，,]+', content)
                 timestamp_str = datetime.now(TZ).strftime("%m/%d %H:%M")
                 for t in tasks:
-                    if t.strip(): 
-                        # 🗃️ 呼叫搬家後的單純雜事寫入服務
-                        add_user_todo(user_name, timestamp_str, t.strip())
+                    if t.strip(): add_user_todo(user_name, timestamp_str, t.strip())
                 reply_text = f"✅ 已為 {user_name} 記錄雜事。"
 
         # 3. 查詢行程
         elif user_msg == "查詢":
             try:
                 combined_reply = f"🌹 {user_name} 的最新情報：\n"
-                # 🗃️ 呼叫搬家後的資料讀取服務
                 rows = get_user_todo_values(user_name)
                 sheet_tasks = []
                 display_count = 0
@@ -251,7 +239,6 @@ def handle_message(event):
             action = "完成" if "完成" in user_msg else "刪除"
             try:
                 num = int(re.search(r'\d+', user_msg).group())
-                # 🗃️ 呼叫搬家後的狀態更新與刪除服務
                 success, task_title = update_or_delete_todo(user_name, num, action)
                 if success: reply_text = f"✅ 已{action}：{task_title}"
                 else: reply_text = f"🧐 找不到編號 {num}"
@@ -263,11 +250,9 @@ def handle_message(event):
             if not keyword: reply_text = "❌ 請輸入關鍵字，例如：取消 去機場"
             else:
                 try:
-                    now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace('+00:00', 'Z')
-                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, q=keyword, timeMin=now_iso).execute().get('items', [])
-                    if events:
-                        CALENDAR_SERVICE.events().delete(calendarId=user_calendar, eventId=events[0]['id']).execute()
-                        reply_text = f"🗑️ 已從日曆取消：{events[0]['summary']}"
+                    # 📅 呼叫搬家後的日曆取消服務
+                    success, canceled_title = delete_calendar_event(user_calendar, keyword)
+                    if success: reply_text = f"🗑️ 已從日曆取消：{canceled_title}"
                     else: reply_text = f"🧐 找不到「{keyword}」行程。"
                 except Exception as e: reply_text = f"取消失敗：{e}"
 
