@@ -1,6 +1,7 @@
 # main.py
 import os
 import pytz
+from contextlib import asynccontextmanager  # 🔑 工具統一排好在頂端
 from fastapi import FastAPI, Request, HTTPException
 from linebot.v3.exceptions import InvalidSignatureError
 from dotenv import load_dotenv
@@ -11,22 +12,24 @@ from scheduler import setup_scheduler
 from services.line_service import get_line_handler
 
 load_dotenv()
-app = FastAPI()
+
+# --- ⏰ 啟動與關閉的生命週期總管 ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # [Startup]: 伺服器啟動時，把排程鬧鐘上鍊
+    app.state.scheduler = setup_scheduler()
+    app.state.scheduler.start()
+    yield
+    # [Shutdown]: 伺服器關閉時，優雅地關掉鬧鐘
+    app.state.scheduler.shutdown()
+
+# 核心主角：宣告 app 時，直接把生命週期管理掛進去（只宣告這一次！）
+app = FastAPI(lifespan=lifespan)
 
 TZ = pytz.timezone('Asia/Taipei')
 
 # 向 LINE 部門牽線，拿到訊息接收的最高指揮官
 HANDLER = get_line_handler()
-
-# --- ⏰ 啟動排程鬧鐘生命週期 ---
-@app.on_event("startup")
-async def startup_event():
-    app.state.scheduler = setup_scheduler()
-    app.state.scheduler.start()
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    app.state.scheduler.shutdown()
 
 
 # --- 🏢 1. FastAPI 網頁網路櫃檯 (對外接口) ---
