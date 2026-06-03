@@ -1,4 +1,3 @@
-Markdown
 # 🌹 LINE 智慧雜事日曆小精靈
 ### `Two-Way Scheduler Bot v2.5`
 
@@ -18,7 +17,7 @@ Markdown
 
 ## 🏗️ 系統模組化架構 (Software Architecture)
 
-本專案歷經重大架構重構 (Refactoring)，全面落實「職責分離 (Separation of Concerns)」心法，專案結構如下：
+本專案歷經重大架構重構（Refactoring），全面落實「職責分離（Separation of Concerns）」心法，專案結構如下：
 
 ```text
 ├── main.py                 # FastAPI 網路櫃檯，全心負責 Webhook 監聽與生命週期管理
@@ -31,14 +30,14 @@ Markdown
     ├── calendar_service.py # Google Calendar 服務專家 (封裝日曆插入/刪除與時區計算)
     └── line_service.py     # LINE 指揮官 (封裝所有字串分析與商業 If-Else 邏輯)
 💎 重構特點
-✨ 極致瘦身主控台：將 main.py 精簡至約 40 行，使其轉職為純粹的 Router 櫃檯。
+✨ 極致瘦身主控台 將原本數百行的 main.py 代碼精簡至約 40 行，使其轉職為純粹的 Router 櫃檯。
 
-✨ 現代化生命週期管理：全面升級為 FastAPI 官方推薦的 @asynccontextmanager (lifespan) 機制，取代過時的舊寫法，確保背景排程器優雅啟停。
+✨ 現代化生命週期管理 (Lifespan) 全面升級為 FastAPI 最新官方推薦的 @asynccontextmanager (lifespan) 機制，
+取代過時的 @app.on_event，確保背景排程器能優雅啟動與關閉。
 
-✨ 無死代碼環境：嚴格落實 Clean Imports 規範，全面清除未使用的工具包，避免全域污染。
+✨ 無死代碼環境 嚴格落實 Clean Imports 規範，全面清除未使用的工具包，避免全域變數污染。
 
 🛠️ 開發套件與技術棧
-
 Backend Framework: FastAPI (Uvicorn)
 
 Database / Storage: Google Sheets API (gspread)
