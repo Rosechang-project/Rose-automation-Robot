@@ -150,29 +150,24 @@ def handle_message(event):
         user_name, user_calendar = current_user['Name'], current_user['Calendar_ID']
         u_worksheet = SPREADSHET.worksheet(user_name)
 
-        # 1. 智慧預約 (全面進化：雷達定位版，徹底解決空格與陣列長度 Bug)
+        # 1. 智慧預約 (全面進化：雷達定位 + timedelta 熱修復版)
         if user_msg.startswith("預約"):
             try:
-                # 移除開頭的"預約"字眼，專注解析後面的內容
                 pure_content = user_msg.replace("預約", "").strip()
                 
-                # 【雷達 1】精確抓取日期 (支援 6/25, 06-25, 0625 等格式)
                 date_match = re.search(r'(\d{1,4}[/\-]\d{1,2})|(\d{4})', pure_content)
-                # 【雷達 2】精確抓取時間 (支援 05:00, 5:00 等格式)
                 time_match = re.search(r'\d{1,2}:\d{2}', pure_content)
                 
                 if not date_match or not time_match:
-                    reply_text = "❌ 格式錯誤！請確保包含日期與時間。範例：預約 6/25 06:00 起床吃早餐"
+                    reply_text = "❌ 格式理解失敗！請確保包含日期與時間。範例：預約 6/25 05:00 起床泡奶"
                 else:
                     date_raw = date_match.group()
                     time_raw = time_match.group()
                     
-                    # 將日期與時間從字串中拔除，剩下的就百分之百是「行程名稱」了！
                     task_name = pure_content.replace(date_raw, "").replace(time_raw, "").strip()
                     if not task_name:
                         task_name = "未命名行程"
                     
-                    # 多格式嘗試解析日期
                     parsed_date = None
                     date_formats = ["%m/%d", "%m-%d", "%m%d", "%Y/%m/%d", "%Y-%m-%d"]
                     
@@ -199,12 +194,14 @@ def handle_message(event):
                             hour=hour_val,
                             minute=min_val
                         ))
-                        end_dt = start_dt + datetime.timedelta(hours=1)
+                        # 修正點：直接使用正統 timedelta
+                        import datetime as dt_module
+                        end_dt = start_dt + dt_module.timedelta(hours=1)
                         
                         # 計算巡邏提醒時間
                         remind_min = 30
                         if start_dt.hour < 12: 
-                            remind_min = int((start_dt - (start_dt - datetime.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
+                            remind_min = int((start_dt - (start_dt - dt_module.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
                         else: 
                             remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
                         
@@ -240,16 +237,14 @@ def handle_message(event):
                 print(f"[ERROR] 預約大崩潰: {e}")
                 reply_text = f"❌ 系統錯誤：{e}"
 
-        # 2. 新增雜事 (全面升級：加入智慧防呆偵測，防止誤輸入時間導致亂碼)
+        # 2. 新增雜事 (防呆機制保持完好)
         elif user_msg.startswith("新增"):
             content = user_msg.replace("新增", "").strip()
             
-            # QA 防禦機制：利用正規表達式偵測是否包含日期格式 (如 6/20, 6-20, 0620) 或時間格式 (如 16:00)
             has_date_pattern = re.search(r'\d{1,2}[/\-]\d{1,2}|\d{4}', content)
             has_time_pattern = re.search(r'\d{1,2}:\d{2}', content)
             
             if has_date_pattern or has_time_pattern:
-                # 攔截並給予最溫柔的系統警告提示
                 reply_text = (
                     f"💡 溫馨提示：偵測到您輸入了時間資訊！\n\n"
                     f"這裡的「新增」僅供記錄單純的【待辦雜事】（不會有定時提醒功能喔）。\n\n"
@@ -257,7 +252,6 @@ def handle_message(event):
                     f"👉 格式範例：預約 6/20 16:00 看牙醫"
                 )
             else:
-                # 正常不帶時間的雜事寫入
                 tasks = re.split(r'[，,]+', content)
                 for t in tasks:
                     if t.strip(): 
