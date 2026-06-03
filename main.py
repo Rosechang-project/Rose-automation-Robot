@@ -1,44 +1,41 @@
 # main.py
 import os
-import datetime as dt_module  # 標準模組重新命名，防止污染
+import datetime as dt_module
 import re
 import pytz
 from fastapi import FastAPI, Request, HTTPException
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
-from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage, PushMessageRequest
+from linebot.v3.messaging import Configuration, ApiClient, MessagingApi, ReplyMessageRequest, TextMessage
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, FollowEvent
 from dotenv import load_dotenv
-from apscheduler.schedulers.background import BackgroundScheduler
-from datetime import datetime  # 全域統一使用類別
+from datetime import datetime
 
-# 🔑 完美召喚 Google Sheets 部門
+# 🔑 召喚各微服務部門專門人才
 from services.sheet_service import (
-    get_user_mapping_sheet, 
-    create_user_worksheet, 
-    update_user_calendar, 
-    add_user_todo, 
-    get_user_todo_values, 
-    update_or_delete_todo
+    get_user_mapping_sheet, create_user_worksheet, update_user_calendar, 
+    add_user_todo, get_user_todo_values, update_or_delete_todo
 )
-
-# 🔑 完美召喚 Google Calendar 部門
-from services.calendar_service import (
-    get_calendar_service,
-    insert_calendar_event,
-    delete_calendar_event
-)
+from services.calendar_service import insert_calendar_event, delete_calendar_event
+from scheduler import setup_scheduler  # ⏰ 召喚獨立排程引擎
 
 load_dotenv()
 app = FastAPI()
 
-# --- 基礎設定 ---
+# --- 基礎配置 ---
 LINE_CONF = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 HANDLER = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 TZ = pytz.timezone('Asia/Taipei')
 
-# 透過轉接頭拿到日曆服務實例，供內建排程使用
-CALENDAR_SERVICE = get_calendar_service()
+# --- ⏰ 啟動排程鬧鐘生命週期 ---
+@app.on_event("startup")
+async def startup_event():
+    app.state.scheduler = setup_scheduler()
+    app.state.scheduler.start()
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    app.state.scheduler.shutdown()
 
 
 # --- 1. Cron-job 友善接口 ---
@@ -57,46 +54,7 @@ async def callback(request: Request):
     return 'OK'
 
 
-# --- 2. 定時提醒任務 (08:00 & 21:00) ---
-def smart_reminder_job():
-    now = datetime.now(TZ)
-    users = get_user_mapping_sheet().get_all_records()
-    
-    if now.hour == 8:
-        start_dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
-        end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        title = "☀️ 早安報報！今日 afternoon 行程："
-    elif now.hour == 21:
-        tomorrow = now + dt_module.timedelta(days=1)
-        start_dt = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
-        end_dt = tomorrow.replace(hour=11, minute=59, second=59, microsecond=0)
-        title = "🌙 晚安報報！明日上午行程預告："
-    else: return
-
-    for user in users:
-        u_id, c_id = user['userId'], user['Calendar_ID']
-        if not c_id or not u_id: continue
-        try:
-            events_res = CALENDAR_SERVICE.events().list(
-                calendarId=c_id, timeMin=start_dt.isoformat(), timeMax=end_dt.isoformat(),
-                singleEvents=True, orderBy='startTime'
-            ).execute()
-            events = events_res.get('items', [])
-            if events:
-                report = f"{title}\n"
-                for e in events:
-                    start = e['start'].get('dateTime', e['start'].get('date'))
-                    report += f"• {start[11:16] if 'T' in start else '全天'} {e['summary']}\n"
-                with ApiClient(LINE_CONF) as api_client:
-                    MessagingApi(api_client).push_message(PushMessageRequest(to=u_id, messages=[TextMessage(text=report.strip())]))
-        except: pass
-
-scheduler = BackgroundScheduler(timezone="Asia/Taipei")
-scheduler.add_job(smart_reminder_job, 'cron', hour='8,21', minute='0')
-scheduler.start()
-
-
-# --- 3. 新友加入引導 ---
+# --- 2. 新友加入引導 ---
 @HANDLER.add(FollowEvent)
 def handle_follow(event):
     welcome_msg = """歡迎來到 Rose 的待辦事項專區！✨
@@ -112,7 +70,7 @@ def handle_follow(event):
         MessagingApi(api_client).reply_message(ReplyMessageRequest(reply_token=event.reply_token, messages=[TextMessage(text=welcome_msg)]))
 
 
-# --- 4. 訊息處理邏輯 ---
+# --- 3. 訊息處理邏輯 ---
 @HANDLER.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     reply_token = event.reply_token 
@@ -186,7 +144,6 @@ def handle_message(event):
                         
                         current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
                         
-                        # 📅 呼叫搬家後的日曆寫入服務
                         insert_calendar_event(user_calendar, task_name, start_dt, end_dt, remind_min, current_time_str)
                         reply_text = f"📅 {user_name} 預約成功：{task_name}"
             except Exception as e: 
@@ -221,7 +178,12 @@ def handle_message(event):
                 
                 if user_calendar:
                     now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace('+00:00', 'Z')
-                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, timeMin=now_iso, maxResults=5, singleEvents=True, orderBy='startTime').execute().get('items', [])
+                    
+                    # 直接拿日曆服務執行查詢
+                    from services.calendar_service import get_calendar_service
+                    svc = get_calendar_service()
+                    events = svc.events().list(calendarId=user_calendar, timeMin=now_iso, maxResults=5, singleEvents=True, orderBy='startTime').execute().get('items', [])
+                    
                     combined_reply += "\n\n📅 【近期行程】\n"
                     if not events: combined_reply += "近期沒有排定行程。"
                     else:
@@ -250,7 +212,6 @@ def handle_message(event):
             if not keyword: reply_text = "❌ 請輸入關鍵字，例如：取消 去機場"
             else:
                 try:
-                    # 📅 呼叫搬家後的日曆取消服務
                     success, canceled_title = delete_calendar_event(user_calendar, keyword)
                     if success: reply_text = f"🗑️ 已從日曆取消：{canceled_title}"
                     else: reply_text = f"🧐 找不到「{keyword}」行程。"
