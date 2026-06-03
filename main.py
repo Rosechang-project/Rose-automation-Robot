@@ -258,7 +258,7 @@ def handle_message(event):
                         u_worksheet.append_row([datetime.now(TZ).strftime("%m/%d %H:%M"), t.strip(), "未完成"])
                 reply_text = f"✅ 已為 {user_name} 記錄雜事。"
 
-        # 3. 查詢行程 (保留執行長文字)
+        # 3. 查詢行程 (全系統時間導正版)
         elif user_msg == "查詢":
             try:
                 combined_reply = f"🌹 {user_name} 的最新情報：\n"
@@ -274,7 +274,10 @@ def handle_message(event):
                 combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) if sheet_tasks else "目前沒有雜事喔！")
                 
                 if user_calendar:
-                    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
+                    # 修正點：配合頂層 import，修正為標準 timezone 呼叫方式
+                    import datetime as dt_module
+                    now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace('+00:00', 'Z')
+                    
                     events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, timeMin=now_iso, maxResults=5, singleEvents=True, orderBy='startTime').execute().get('items', [])
                     combined_reply += "\n\n📅 【近期行程】\n"
                     if not events: combined_reply += "近期沒有排定行程。"
