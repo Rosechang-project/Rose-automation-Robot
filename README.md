@@ -2,7 +2,7 @@ Markdown
 # 🌹 LINE 智慧雜事日曆小精靈
 ### `Two-Way Scheduler Bot v2.5`
 
-這是一款專為多人團隊、多用戶設計的 **LINE 智慧待辦與 Google 日曆雙向同步小精靈**。  
+一款專為多人團隊、多用戶設計的 **LINE 智慧待辦與 Google 日曆雙向同步系統**。  
 專案採用現代化微服務（Microservices）架構設計，將網路櫃檯、字串分析邏輯、試算表資料庫與日曆 API 徹底解耦，具備高度的永續擴充性與極致的 Clean Code 表現。
 
 ---
@@ -31,11 +31,11 @@ Markdown
     ├── calendar_service.py # Google Calendar 服務專家 (封裝日曆插入/刪除與時區計算)
     └── line_service.py     # LINE 指揮官 (封裝所有字串分析與商業 If-Else 邏輯)
 💎 重構特點
-極致瘦身 main.py：將原本數百行的代碼精簡至約 40 行，僅保留純粹的 Router 功能。
+✨ 極致瘦身主控台 將原本數百行的 main.py 代碼精簡至約 40 行，使其轉職為純粹的 Router 櫃檯。
 
-現代化生命週期管理：揚棄過時的 @app.on_event，全面升級為 FastAPI 最新官方推薦的 @asynccontextmanager (lifespan) 機制，確保排程器優雅啟動與關閉。
+✨ 現代化生命週期管理 (Lifespan) 全面升級為 FastAPI 最新官方推薦的 @asynccontextmanager (lifespan) 機制，取代過時的 @app.on_event，確保背景排程器能優雅啟動與關閉。
 
-無死代碼（Clean Imports）：嚴格清除未使用的工具包，避免全域變數污染。
+✨ 無死代碼環境 嚴格落實 Clean Imports 規範，全面清除未使用的工具包，避免全域變數污染。
 
 🛠️ 開發套件與技術棧
 Backend Framework: FastAPI (Uvicorn)
@@ -64,7 +64,7 @@ python -m venv venv
 
 # macOS/Linux 啟用命令：
 source venv/bin/activate
-3. 安装依賴套件
+3. 安裝依賴套件
 Bash
 pip install fastapi uvicorn gspread google-api-python-client apscheduler pytz line-bot-sdk python-dotenv
 4. 配置環境變數 (.env)
