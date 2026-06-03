@@ -1,5 +1,5 @@
 import os
-import datetime
+import datetime as dt_module  # 標準模組重新命名，防止污染
 import re
 import gspread
 import pytz
@@ -12,8 +12,7 @@ from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from apscheduler.schedulers.background import BackgroundScheduler
-import re
-from datetime import datetime
+from datetime import datetime  # 全域統一使用類別
 
 load_dotenv()
 app = FastAPI()
@@ -44,10 +43,10 @@ def get_user_mapping_sheet():
         sheet.append_row(["Name", "userId", "Calendar_ID", "Status"])
         return sheet
 
-# --- 1. Cron-job 友善接口 ---
+# --- 1. Cron-job 友善接口 (已導正時間寫法) ---
 @app.get("/")
 async def home():
-    return {"status": "小精靈二號機運作中", "uptime": str(datetime.datetime.now(TZ))}
+    return {"status": "小精靈二號機運作中", "uptime": str(datetime.now(TZ))}
 
 @app.post("/callback")
 async def callback(request: Request):
@@ -59,9 +58,9 @@ async def callback(request: Request):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return 'OK'
 
-# --- 2. 定時提醒任務 (08:00 & 21:00) ---
+# --- 2. 定時提醒任務 (08:00 & 21:00) (已導正時間寫法) ---
 def smart_reminder_job():
-    now = datetime.datetime.now(TZ)
+    now = datetime.now(TZ)
     users = get_user_mapping_sheet().get_all_records()
     
     if now.hour == 8:
@@ -69,7 +68,7 @@ def smart_reminder_job():
         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
         title = "☀️ 早安報報！今日下午行程："
     elif now.hour == 21:
-        tomorrow = now + datetime.timedelta(days=1)
+        tomorrow = now + dt_module.timedelta(days=1)
         start_dt = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end_dt = tomorrow.replace(hour=11, minute=59, second=59, microsecond=0)
         title = "🌙 晚安報報！明日上午行程預告："
@@ -150,7 +149,7 @@ def handle_message(event):
         user_name, user_calendar = current_user['Name'], current_user['Calendar_ID']
         u_worksheet = SPREADSHET.worksheet(user_name)
 
-        # 1. 智慧預約 (全面進化：雷達定位 + timedelta 熱修復版)
+        # 1. 智慧預約 (全面進化：雷達定位版，徹底解決全格式相容問題)
         if user_msg.startswith("預約"):
             try:
                 pure_content = user_msg.replace("預約", "").strip()
@@ -186,7 +185,6 @@ def handle_message(event):
                         current_year = datetime.now(TZ).year
                         hour_val, min_val = map(int, time_raw.split(':'))
                         
-                        # 組合最終台北標準時間
                         start_dt = TZ.localize(datetime(
                             year=current_year,
                             month=parsed_date.month,
@@ -194,21 +192,17 @@ def handle_message(event):
                             hour=hour_val,
                             minute=min_val
                         ))
-                        # 修正點：直接使用正統 timedelta
-                        import datetime as dt_module
                         end_dt = start_dt + dt_module.timedelta(hours=1)
                         
-                        # 計算巡邏提醒時間
                         remind_min = 30
                         if start_dt.hour < 12: 
                             remind_min = int((start_dt - (start_dt - dt_module.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
                         else: 
                             remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
                         
-                        # 結構化日曆設定
                         current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
                         body = {
-                            'summary': task_name, # ✅ 還原！妹妹輸入什麼，日曆標題就是什麼
+                            'summary': task_name,
                             'description': (
                                 f"=======================\n"
                                 f"📅 建立時間：{current_time_str} (台北時間)\n"
@@ -236,7 +230,7 @@ def handle_message(event):
                 print(f"[ERROR] 預約大崩潰: {e}")
                 reply_text = f"❌ 系統錯誤：{e}"
 
-        # 2. 新增雜事 (防呆機制保持完好)
+        # 2. 新增雜事 (智慧防呆機制)
         elif user_msg.startswith("新增"):
             content = user_msg.replace("新增", "").strip()
             
@@ -263,18 +257,16 @@ def handle_message(event):
                 combined_reply = f"🌹 {user_name} 的最新情報：\n"
                 rows = u_worksheet.get_all_values()
                 sheet_tasks = []
-                display_count = 0  # 這是顯示用的編號
+                display_count = 0
                 for i, row in enumerate(rows):
-                    if i == 0: continue # 跳過標題列
+                    if i == 0: continue
                     if len(row) > 2 and row[2] == "未完成":
-                        display_count += 1 # 只有找到未完成時，編號才加 1
+                        display_count += 1
                         sheet_tasks.append(f"{display_count}. ⏳ {row[1]}")
                 
                 combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) if sheet_tasks else "目前沒有雜事喔！")
                 
                 if user_calendar:
-                    # 修正點：配合頂層 import，修正為標準 timezone 呼叫方式
-                    import datetime as dt_module
                     now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace('+00:00', 'Z')
                     
                     events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, timeMin=now_iso, maxResults=5, singleEvents=True, orderBy='startTime').execute().get('items', [])
@@ -309,13 +301,14 @@ def handle_message(event):
                 else: reply_text = f"🧐 找不到編號 {num}"
             except: reply_text = f"❌ 請輸入數字，例如：{action} 1"
 
-        # 5. 取消行程 (日曆)
+        # 5. 取消行程 (個人專用、時間導正版)
         elif user_msg.startswith("取消"):
             keyword = user_msg.replace("取消", "").strip()
             if not keyword: reply_text = "❌ 請輸入關鍵字，例如：取消 去機場"
             else:
                 try:
-                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, q=keyword, timeMin=datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')).execute().get('items', [])
+                    now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace('+00:00', 'Z')
+                    events = CALENDAR_SERVICE.events().list(calendarId=user_calendar, q=keyword, timeMin=now_iso).execute().get('items', [])
                     if events:
                         CALENDAR_SERVICE.events().delete(calendarId=user_calendar, eventId=events[0]['id']).execute()
                         reply_text = f"🗑️ 已從日曆取消：{events[0]['summary']}"
