@@ -30,12 +30,11 @@ Markdown
     ├── sheet_service.py    # Google Sheets 服務專家 (封裝所有 Excel 讀寫邏輯)
     ├── calendar_service.py # Google Calendar 服務專家 (封裝日曆插入/刪除與時區計算)
     └── line_service.py     # LINE 指揮官 (封裝所有字串分析與商業 If-Else 邏輯)
-💎 重構特點
-✨ 極致瘦身主控台 將原本數百行的 main.py 代碼精簡至約 40 行，使其轉職為純粹的 Router 櫃檯。
+### 💎 重構特點
 
-✨ 現代化生命週期管理 (Lifespan) 全面升級為 FastAPI 最新官方推薦的 @asynccontextmanager (lifespan) 機制，取代過時的 @app.on_event，確保背景排程器能優雅啟動與關閉。
-
-✨ 無死代碼環境 嚴格落實 Clean Imports 規範，全面清除未使用的工具包，避免全域變數污染。
+- ✨ **極致瘦身主控台**：將 `main.py` 精簡至約 40 行，使其轉職為純粹的 Router 櫃檯。
+- ✨ **現代化生命週期管理**：全面升級為 FastAPI 官方推薦的 `@asynccontextmanager` (`lifespan`) 機制，取代過時的舊寫法，確保背景排程器優雅啟停。
+- ✨ **無死代碼環境**：嚴格落實 Clean Imports 規範，全面清除未使用的工具包，避免全域污染。
 
 🛠️ 開發套件與技術棧
 Backend Framework: FastAPI (Uvicorn)
