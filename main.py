@@ -150,32 +150,57 @@ def handle_message(event):
         user_name, user_calendar = current_user['Name'], current_user['Calendar_ID']
         u_worksheet = SPREADSHET.worksheet(user_name)
 
-        # 1. 智慧預約 (支援 5/20, 0520 等格式)
-        # 1. 智慧預約 (支援 5/20, 0520 等格式)
+        # 1. 智慧預約 (全面升級：支援 6/20, 6-20, 0620, 2026/06/20 全相容防禦寫法)
         if user_msg.startswith("預約"):
             try:
                 parts = re.split(r'\s+', user_msg)
                 if len(parts) >= 4:
                     date_raw, time_raw, task_name = parts[1], parts[2], " ".join(parts[3:])
-                    date_clean = date_raw.replace("/", "").replace("-", "").zfill(4) # 轉成 0520
                     
-                    # 【優化 1】優化時間計算與台北時區定錨
-                    current_year = datetime.datetime.now(TZ).year
-                    naive_dt = datetime.datetime.strptime(f"{current_year}-{date_clean[:2]}-{date_clean[2:]} {time_raw}", "%Y-%m-%d %H:%M")
-                    start_dt = TZ.localize(naive_dt)
-                    end_dt = start_dt + datetime.timedelta(hours=1)
+                    # 多格式嘗試解析日期
+                    parsed_date = None
+                    date_formats = ["%m/%d", "%m-%d", "%m%d", "%Y/%m/%d", "%Y-%m-%d"]
                     
-                    if not user_calendar: 
+                    for fmt in date_formats:
+                        try:
+                            parsed_date = datetime.strptime(date_raw, fmt)
+                            break
+                        except ValueError:
+                            continue
+                    
+                    if not parsed_date:
+                        reply_text = "❌ 日期格式無法識別，請輸入如：6/20、06-20 或 0620"
+                    elif not user_calendar: 
                         reply_text = "❌ 尚未設定日曆 ID，請先回傳 Gmail 帳號。"
                     else:
+                        # 成功解析日期，自動補上今年
+                        current_year = datetime.now(TZ).year
+                        
+                        # 解析時間的時與分
+                        time_parts = time_raw.split(':')
+                        if len(time_parts) != 2:
+                            raise ValueError("時間格式不對")
+                        hour_val, min_val = int(time_parts[0]), int(time_parts[1])
+                        
+                        # 組合最終的台北標準時間
+                        start_dt = TZ.localize(datetime(
+                            year=current_year,
+                            month=parsed_date.month,
+                            day=parsed_date.day,
+                            hour=hour_val,
+                            minute=min_val
+                        ))
+                        end_dt = start_dt + datetime.timedelta(hours=1)
+                        
+                        # 計算巡邏提醒時間
                         remind_min = 30
                         if start_dt.hour < 12: 
                             remind_min = int((start_dt - (start_dt - datetime.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
                         else: 
                             remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
                         
-                        # 【優化 2】將寫入日曆的格式改為精美結構化
-                        current_time_str = datetime.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+                        # 精美結構化日曆欄位
+                        current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
                         body = {
                             'summary': f'🎯 [MamaVia] {user_name} - {task_name}',
                             'description': (
@@ -202,22 +227,34 @@ def handle_message(event):
                         CALENDAR_SERVICE.events().insert(calendarId=user_calendar, body=body).execute()
                         reply_text = f"📅 {user_name} 預約成功：{task_name}"
                 else: 
-                    reply_text = "❌ 格式：預約 5/20 11:00 去機場"
-            except ValueError as val_err:
-                # 【優化 3】精確攔截時間格式錯誤
-                print(f"[ERROR] 時間格式解析失敗: {val_err}")
-                reply_text = "❌ 時間格式理解失敗，請確保輸入如「5/20 14:00」的正確格式。"
+                    reply_text = "❌ 格式：預約 6/20 14:00 去機場"
             except Exception as e: 
-                print(f"[CRITICAL] 系統非預期錯誤: {e}")
-                reply_text = f"預約失敗：{e}"
+                print(f"[ERROR] 預約失敗: {e}")
+                reply_text = "❌ 預約設定失敗，請確保時間格式為「14:00」，並包含完整內容（例：預約 0620 14:00 看牙醫）。"
 
-        # 2. 新增雜事 (嚴格開頭，防止誤入)
+        # 2. 新增雜事 (全面升級：加入智慧防呆偵測，防止誤輸入時間導致亂碼)
         elif user_msg.startswith("新增"):
             content = user_msg.replace("新增", "").strip()
-            tasks = re.split(r'[，,]+', content)
-            for t in tasks:
-                if t.strip(): u_worksheet.append_row([datetime.datetime.now(TZ).strftime("%m/%d %H:%M"), t.strip(), "未完成"])
-            reply_text = f"✅ 已為 {user_name} 記錄雜事。"
+            
+            # QA 防禦機制：利用正規表達式偵測是否包含日期格式 (如 6/20, 6-20, 0620) 或時間格式 (如 16:00)
+            has_date_pattern = re.search(r'\d{1,2}[/\-]\d{1,2}|\d{4}', content)
+            has_time_pattern = re.search(r'\d{1,2}:\d{2}', content)
+            
+            if has_date_pattern or has_time_pattern:
+                # 攔截並給予最溫柔的系統警告提示
+                reply_text = (
+                    f"💡 溫馨提示：偵測到您輸入了時間資訊！\n\n"
+                    f"這裡的「新增」僅供記錄單純的【待辦雜事】（不會有定時提醒功能喔）。\n\n"
+                    f"如果您希望小精靈巡邏並定時提醒您，請改用【預約】功能！\n"
+                    f"👉 格式範例：預約 6/20 16:00 看牙醫"
+                )
+            else:
+                # 正常不帶時間的雜事寫入
+                tasks = re.split(r'[，,]+', content)
+                for t in tasks:
+                    if t.strip(): 
+                        u_worksheet.append_row([datetime.now(TZ).strftime("%m/%d %H:%M"), t.strip(), "未完成"])
+                reply_text = f"✅ 已為 {user_name} 記錄雜事。"
 
         # 3. 查詢行程 (保留執行長文字)
         elif user_msg == "查詢":
