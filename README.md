@@ -1,7 +1,7 @@
 # 🌹 LINE 智慧雜事日曆小精靈
 ### `Two-Way Scheduler Bot v2.5`
 
-一款專為多人團隊、多用戶設計的 **LINE 智慧待辦與 Google 日曆雙向同步系統**。  
+一款專用戶設計的 **LINE 智慧待辦與 Google 日曆雙向同步系統**。  
 專案採用現代化微服務（Microservices）架構設計，將網路櫃檯、字串分析邏輯、試算表資料庫與日曆 API 徹底解耦，具備高度的永續擴充性與極致的 Clean Code 表現。
 
 ---
