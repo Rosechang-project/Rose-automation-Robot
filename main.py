@@ -208,10 +208,9 @@ def handle_message(event):
                         # 結構化日曆設定
                         current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
                         body = {
-                            'summary': f'🎯 [MamaVia] {user_name} - {task_name}',
+                            'summary': task_name, # ✅ 還原！妹妹輸入什麼，日曆標題就是什麼
                             'description': (
                                 f"=======================\n"
-                                f"👤 預約人員：{user_name}\n"
                                 f"📅 建立時間：{current_time_str} (台北時間)\n"
                                 f"📝 備註事項：透過 LINE 小精靈自動同步\n"
                                 f"======================="
