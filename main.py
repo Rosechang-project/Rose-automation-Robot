@@ -12,6 +12,8 @@ from dotenv import load_dotenv
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from apscheduler.schedulers.background import BackgroundScheduler
+import re
+from datetime import datetime
 
 load_dotenv()
 app = FastAPI()
@@ -20,7 +22,11 @@ app = FastAPI()
 LINE_CONF = Configuration(access_token=os.getenv('LINE_CHANNEL_ACCESS_TOKEN'))
 HANDLER = WebhookHandler(os.getenv('LINE_CHANNEL_SECRET'))
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/calendar"]
-CREDS = Credentials.from_service_account_file("google_key.json", scopes=SCOPE)
+
+# 優化：金鑰路徑由環境變數讀取，若沒設定則預設為 "google_key.json"
+GOOGLE_KEY_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', 'google_key.json')
+CREDS = Credentials.from_service_account_file(GOOGLE_KEY_PATH, scopes=SCOPE)
+
 TZ = pytz.timezone('Asia/Taipei')
 
 # --- 服務初始化 ---
@@ -145,25 +151,65 @@ def handle_message(event):
         u_worksheet = SPREADSHET.worksheet(user_name)
 
         # 1. 智慧預約 (支援 5/20, 0520 等格式)
+        # 1. 智慧預約 (支援 5/20, 0520 等格式)
         if user_msg.startswith("預約"):
             try:
                 parts = re.split(r'\s+', user_msg)
                 if len(parts) >= 4:
                     date_raw, time_raw, task_name = parts[1], parts[2], " ".join(parts[3:])
                     date_clean = date_raw.replace("/", "").replace("-", "").zfill(4) # 轉成 0520
-                    start_dt = TZ.localize(datetime.datetime.strptime(f"{datetime.datetime.now(TZ).year}-{date_clean[:2]}-{date_clean[2:]} {time_raw}", "%Y-%m-%d %H:%M"))
                     
-                    if not user_calendar: reply_text = "❌ 尚未設定日曆 ID，請先回傳 Gmail 帳號。"
+                    # 【優化 1】優化時間計算與台北時區定錨
+                    current_year = datetime.datetime.now(TZ).year
+                    naive_dt = datetime.datetime.strptime(f"{current_year}-{date_clean[:2]}-{date_clean[2:]} {time_raw}", "%Y-%m-%d %H:%M")
+                    start_dt = TZ.localize(naive_dt)
+                    end_dt = start_dt + datetime.timedelta(hours=1)
+                    
+                    if not user_calendar: 
+                        reply_text = "❌ 尚未設定日曆 ID，請先回傳 Gmail 帳號。"
                     else:
                         remind_min = 30
-                        if start_dt.hour < 12: remind_min = int((start_dt - (start_dt - datetime.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
-                        else: remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
+                        if start_dt.hour < 12: 
+                            remind_min = int((start_dt - (start_dt - datetime.timedelta(days=1)).replace(hour=21, minute=0)).total_seconds() / 60)
+                        else: 
+                            remind_min = int((start_dt - start_dt.replace(hour=8, minute=0)).total_seconds() / 60)
                         
-                        body = {'summary': task_name, 'start': {'dateTime': start_dt.isoformat()}, 'end': {'dateTime': (start_dt + datetime.timedelta(hours=1)).isoformat()}, 'reminders': {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': max(1, remind_min)}]}}
+                        # 【優化 2】將寫入日曆的格式改為精美結構化
+                        current_time_str = datetime.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+                        body = {
+                            'summary': f'🎯 [MamaVia] {user_name} - {task_name}',
+                            'description': (
+                                f"=======================\n"
+                                f"👤 預約人員：{user_name}\n"
+                                f"📅 建立時間：{current_time_str} (台北時間)\n"
+                                f"📝 備註事項：透過 LINE 小精靈自動同步\n"
+                                f"======================="
+                            ),
+                            'start': {
+                                'dateTime': start_dt.isoformat(),
+                                'timeZone': 'Asia/Taipei',
+                            },
+                            'end': {
+                                'dateTime': end_dt.isoformat(),
+                                'timeZone': 'Asia/Taipei',
+                            },
+                            'reminders': {
+                                'useDefault': False, 
+                                'overrides': [{'method': 'popup', 'minutes': max(1, remind_min)}]
+                            }
+                        }
+                        
                         CALENDAR_SERVICE.events().insert(calendarId=user_calendar, body=body).execute()
                         reply_text = f"📅 {user_name} 預約成功：{task_name}"
-                else: reply_text = "❌ 格式：預約 5/20 11:00 去機場"
-            except Exception as e: reply_text = f"預約失敗：{e}"
+                else: 
+                    reply_text = "❌ 格式：預約 5/20 11:00 去機場"
+            except ValueError as val_err:
+                # 【優化 3】精確攔截時間格式錯誤
+                print(f"[ERROR] 時間格式解析失敗: {val_err}")
+                reply_text = "❌ 時間格式理解失敗，請確保輸入如「5/20 14:00」的正確格式。"
+            except Exception as e: 
+                print(f"[CRITICAL] 系統非預期錯誤: {e}")
+                reply_text = f"預約失敗：{e}"
 
         # 2. 新增雜事 (嚴格開頭，防止誤入)
         elif user_msg.startswith("新增"):
