@@ -43,13 +43,13 @@ def handle_follow(event):
     welcome_msg = """歡迎使用 Rose 行程管理機器人。
 
 你可以先輸入：
-註冊 Rose
+我是 Rose
 
 註冊完成後，再傳你的 Google Calendar ID 或 Gmail，系統會幫你綁定日曆。
 
 常用指令：
-待辦 買牛奶、整理簡報
-行程 6/25 09:00 開會
+新增 買牛奶、整理簡報
+預約 6/25 09:00 開會
 查詢
 完成 1
 刪除 1
@@ -66,10 +66,12 @@ def handle_message(event):
     user_list = get_user_mapping_sheet().get_all_records()
     current_user = next((u for u in user_list if u["userId"] == u_id), None)
 
-    if user_msg.startswith("註冊"):
-        name = user_msg.replace("註冊", "", 1).strip()
+    register_command = first_matching_prefix(user_msg, ["我是", "註冊"])
+
+    if register_command:
+        name = user_msg.replace(register_command, "", 1).strip()
         if not name:
-            reply_text = "請輸入你的名字，例如：註冊 Rose"
+            reply_text = "請輸入你的名字，例如：我是 Rose"
         elif current_user:
             reply_text = f"你已經註冊過了，目前名稱是：{current_user['Name']}"
         elif any(u["Name"] == name for u in user_list):
@@ -87,7 +89,7 @@ def handle_message(event):
 
     elif "@" in user_msg and "." in user_msg:
         if not current_user:
-            reply_text = "請先註冊，例如：註冊 Rose"
+            reply_text = "請先註冊，例如：我是 Rose"
         else:
             update_user_calendar(u_id, user_msg)
             reply_text = (
@@ -99,10 +101,10 @@ def handle_message(event):
         user_name = current_user["Name"]
         user_calendar = current_user["Calendar_ID"]
 
-        if user_msg.startswith("行程"):
+        if first_matching_prefix(user_msg, ["預約", "行程"]):
             reply_text = handle_calendar_command(user_msg, user_name, user_calendar)
 
-        elif user_msg.startswith("待辦"):
+        elif first_matching_prefix(user_msg, ["新增", "待辦"]):
             reply_text = handle_todo_command(user_msg, user_name)
 
         elif user_msg == "查詢":
@@ -140,25 +142,30 @@ def handle_message(event):
             reply_text = (
                 f"{user_name}，我看不懂這個指令。\n\n"
                 "可以試試：\n"
-                "待辦 買牛奶\n"
-                "行程 6/25 09:00 開會\n"
+                "新增 買牛奶\n"
+                "預約 6/25 09:00 開會\n"
                 "查詢"
             )
 
     else:
-        reply_text = "請先註冊，例如：註冊 Rose"
+        reply_text = "請先註冊，例如：我是 Rose"
 
     reply(reply_token, reply_text)
 
 
+def first_matching_prefix(text, prefixes):
+    return next((prefix for prefix in prefixes if text.startswith(prefix)), None)
+
+
 def handle_calendar_command(user_msg, user_name, user_calendar):
     try:
-        pure_content = user_msg.replace("行程", "", 1).strip()
+        command = first_matching_prefix(user_msg, ["預約", "行程"])
+        pure_content = user_msg.replace(command, "", 1).strip()
         date_match = re.search(r"(\d{4}[/\-]\d{1,2}[/\-]\d{1,2})|(\d{1,2}[/\-]\d{1,2})|(\d{4})", pure_content)
         time_match = re.search(r"\d{1,2}:\d{2}", pure_content)
 
         if not date_match or not time_match:
-            return "格式不完整，請輸入：行程 6/25 09:00 開會"
+            return "格式不完整，請輸入：預約 6/25 09:00 開會"
 
         date_raw = date_match.group()
         time_raw = time_match.group()
@@ -203,13 +210,14 @@ def parse_date(date_raw):
 
 
 def handle_todo_command(user_msg, user_name):
-    content = user_msg.replace("待辦", "", 1).strip()
+    command = first_matching_prefix(user_msg, ["新增", "待辦"])
+    content = user_msg.replace(command, "", 1).strip()
     if not content:
-        return "請輸入待辦內容，例如：待辦 買牛奶"
+        return "請輸入待辦內容，例如：新增 買牛奶"
     if re.search(r"\d{1,2}[/\-]\d{1,2}|\d{4}", content) or re.search(r"\d{1,2}:\d{2}", content):
         return (
             "這看起來像有日期或時間的行程。\n"
-            "如果要加入 Google Calendar，請改用：行程 6/20 16:00 開會"
+            "如果要加入 Google Calendar，請改用：預約 6/20 16:00 開會"
         )
 
     tasks = re.split(r"[、,，]+", content)

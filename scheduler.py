@@ -21,6 +21,7 @@ CALENDAR_SERVICE = get_calendar_service()
 def smart_reminder_job():
     now = datetime.now(TZ)
     users = get_user_mapping_sheet().get_all_records()
+    print(f"[Scheduler] reminder job started at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}; users={len(users)}")
 
     if now.hour == 8:
         start_dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
@@ -32,11 +33,14 @@ def smart_reminder_job():
         end_dt = tomorrow.replace(hour=11, minute=59, second=59, microsecond=0)
         title = "晚安提醒：明天上午的行程"
     else:
+        print(f"[Scheduler] skipped; current hour {now.hour} is not a reminder hour")
         return
 
-    for user in users:
-        u_id, calendar_id = user["userId"], user["Calendar_ID"]
+    for index, user in enumerate(users, start=1):
+        u_id = user.get("userId")
+        calendar_id = user.get("Calendar_ID")
         if not calendar_id or not u_id:
+            print(f"[Scheduler] user {index} skipped; missing userId or Calendar_ID")
             continue
         try:
             events_res = (
@@ -51,6 +55,7 @@ def smart_reminder_job():
                 .execute()
             )
             events = events_res.get("items", [])
+            print(f"[Scheduler] user {index}; events={len(events)}; window={start_dt.isoformat()}~{end_dt.isoformat()}")
 
             if events:
                 report = f"{title}\n"
@@ -63,11 +68,21 @@ def smart_reminder_job():
                     MessagingApi(api_client).push_message(
                         PushMessageRequest(to=u_id, messages=[TextMessage(text=report.strip())])
                     )
+                print(f"[Scheduler] user {index}; push sent")
         except Exception as e:
-            print(f"[Scheduler Error] 推播失敗：{e}")
+            print(f"[Scheduler Error] user {index}; 推播失敗：{e}")
 
 
 def setup_scheduler():
     scheduler = BackgroundScheduler(timezone="Asia/Taipei")
-    scheduler.add_job(smart_reminder_job, "cron", hour="8,21", minute="0")
+    scheduler.add_job(
+        smart_reminder_job,
+        "cron",
+        hour="8,21",
+        minute="0",
+        coalesce=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
+    print("[Scheduler] registered reminder job at Asia/Taipei 08:00 and 21:00")
     return scheduler
