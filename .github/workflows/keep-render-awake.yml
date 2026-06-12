@@ -1,0 +1,20 @@
+name: Keep Render Awake
+
+on:
+  schedule:
+    - cron: "5/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping Render service
+        run: |
+          curl --fail --silent --show-error \
+            --location \
+            --max-time 45 \
+            --retry 2 \
+            --retry-delay 10 \
+            https://rose-automation-robot.onrender.com/
