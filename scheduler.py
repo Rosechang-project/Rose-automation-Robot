@@ -26,12 +26,12 @@ def smart_reminder_job():
     if now.hour == 8:
         start_dt = now.replace(hour=12, minute=0, second=0, microsecond=0)
         end_dt = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        title = "午安提醒：今天下午到晚上的行程"
+        title = "☀️ 早安報報！今日下午行程："
     elif now.hour == 21:
         tomorrow = now + dt_module.timedelta(days=1)
         start_dt = tomorrow.replace(hour=0, minute=0, second=0, microsecond=0)
         end_dt = tomorrow.replace(hour=11, minute=59, second=59, microsecond=0)
-        title = "晚安提醒：明天上午的行程"
+        title = "🌙 晚安報報！明日上午行程預告："
     else:
         print(f"[Scheduler] skipped; current hour {now.hour} is not a reminder hour")
         return
@@ -62,7 +62,7 @@ def smart_reminder_job():
                 for event in events:
                     start = event["start"].get("dateTime", event["start"].get("date"))
                     time_text = start[11:16] if "T" in start else "全天"
-                    report += f"{time_text} {event['summary']}\n"
+                    report += f"• {time_text} {event['summary']}\n"
 
                 with ApiClient(LINE_CONF) as api_client:
                     MessagingApi(api_client).push_message(
