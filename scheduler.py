@@ -21,6 +21,7 @@ CALENDAR_SERVICE = get_calendar_service()
 def smart_reminder_job():
     now = datetime.now(TZ)
     users = get_user_mapping_sheet().get_all_records()
+    summary = {"users": len(users), "events": 0, "sent": 0, "skipped": 0, "errors": 0}
     print(f"[Scheduler] reminder job started at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}; users={len(users)}")
 
     if now.hour == 8:
@@ -34,13 +35,16 @@ def smart_reminder_job():
         title = "🌙 晚安報報！明日上午行程預告："
     else:
         print(f"[Scheduler] skipped; current hour {now.hour} is not a reminder hour")
-        return
+        summary["skipped"] = len(users)
+        summary["reason"] = f"current hour {now.hour} is not a reminder hour"
+        return summary
 
     for index, user in enumerate(users, start=1):
         u_id = user.get("userId")
         calendar_id = user.get("Calendar_ID")
         if not calendar_id or not u_id:
             print(f"[Scheduler] user {index} skipped; missing userId or Calendar_ID")
+            summary["skipped"] += 1
             continue
         try:
             events_res = (
@@ -55,6 +59,7 @@ def smart_reminder_job():
                 .execute()
             )
             events = events_res.get("items", [])
+            summary["events"] += len(events)
             print(f"[Scheduler] user {index}; events={len(events)}; window={start_dt.isoformat()}~{end_dt.isoformat()}")
 
             if events:
@@ -68,9 +73,13 @@ def smart_reminder_job():
                     MessagingApi(api_client).push_message(
                         PushMessageRequest(to=u_id, messages=[TextMessage(text=report.strip())])
                     )
+                summary["sent"] += 1
                 print(f"[Scheduler] user {index}; push sent")
         except Exception as e:
+            summary["errors"] += 1
             print(f"[Scheduler Error] user {index}; 推播失敗：{e}")
+
+    return summary
 
 
 def setup_scheduler():

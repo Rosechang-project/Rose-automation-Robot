@@ -1,13 +1,14 @@
 # main.py
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 import pytz
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from linebot.v3.exceptions import InvalidSignatureError
 
-from scheduler import setup_scheduler
+from scheduler import setup_scheduler, smart_reminder_job
 from services.line_service import get_line_handler
 
 load_dotenv()
@@ -40,6 +41,18 @@ async def callback(request: Request):
     except InvalidSignatureError:
         raise HTTPException(status_code=400, detail="Invalid signature")
     return "OK"
+
+
+@app.post("/cron/reminder")
+async def trigger_reminder(x_cron_secret: str | None = Header(default=None)):
+    expected_secret = os.getenv("CRON_SECRET")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
+    if x_cron_secret != expected_secret:
+        raise HTTPException(status_code=403, detail="Invalid cron secret")
+
+    summary = smart_reminder_job()
+    return {"status": "triggered", "summary": summary, "triggered_at": str(datetime.now(TZ))}
 
 
 if __name__ == "__main__":
