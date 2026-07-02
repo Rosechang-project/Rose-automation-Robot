@@ -162,3 +162,37 @@ Name | userId | Calendar_ID | Status
 ```text
 時間 | 任務 | 狀態
 ```
+
+## 資料儲存設計
+
+這個專案目前使用 Google Sheets 作為輕量資料庫，主要儲存 LINE 使用者對應、Google Calendar ID，以及每位使用者的待辦事項。
+
+選擇 Google Sheets 是因為它很適合 MVP 階段：
+
+- 設定成本低，可以快速驗證 LINE bot 的核心流程。
+- 資料可以直接用試算表檢查，方便測試與除錯。
+- 對個人助理型 bot 來說，少量文字資料已經足夠使用。
+- 非工程背景的人也能理解資料結構。
+
+如果未來使用者數量增加，或需要更完整的查詢、權限控管與後台管理，可以將資料層從 `services/sheet_service.py` 抽換成 Supabase/PostgreSQL。預計可改為：
+
+```text
+users
+- id
+- name
+- line_user_id
+- calendar_id
+- status
+- created_at
+- updated_at
+
+todos
+- id
+- user_id
+- title
+- status
+- created_at
+- completed_at
+```
+
+這樣可以保留目前的 LINE bot 與 Google Calendar 整合邏輯，只替換資料儲存層，讓專案從快速原型逐步演進成更正式的後端架構。
