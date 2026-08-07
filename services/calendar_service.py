@@ -14,12 +14,15 @@ TZ = pytz.timezone("Asia/Taipei")
 SCOPE = ["https://www.googleapis.com/auth/calendar"]
 GOOGLE_KEY_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "google_key.json")
 
-CREDS = Credentials.from_service_account_file(GOOGLE_KEY_PATH, scopes=SCOPE)
-CALENDAR_SERVICE = build("calendar", "v3", credentials=CREDS)
+_calendar_service = None
 
 
 def get_calendar_service():
-    return CALENDAR_SERVICE
+    global _calendar_service
+    if _calendar_service is None:
+        creds = Credentials.from_service_account_file(GOOGLE_KEY_PATH, scopes=SCOPE)
+        _calendar_service = build("calendar", "v3", credentials=creds)
+    return _calendar_service
 
 
 def insert_calendar_event(user_calendar, task_name, start_dt, end_dt, remind_min, current_time_str):
@@ -38,19 +41,19 @@ def insert_calendar_event(user_calendar, task_name, start_dt, end_dt, remind_min
             "overrides": [{"method": "popup", "minutes": max(1, remind_min)}],
         },
     }
-    return CALENDAR_SERVICE.events().insert(calendarId=user_calendar, body=body).execute()
+    return get_calendar_service().events().insert(calendarId=user_calendar, body=body).execute()
 
 
 def delete_calendar_event(user_calendar, keyword):
     now_iso = datetime.now(dt_module.timezone.utc).isoformat().replace("+00:00", "Z")
     events = (
-        CALENDAR_SERVICE.events()
+        get_calendar_service().events()
         .list(calendarId=user_calendar, q=keyword, timeMin=now_iso)
         .execute()
         .get("items", [])
     )
 
     if events:
-        CALENDAR_SERVICE.events().delete(calendarId=user_calendar, eventId=events[0]["id"]).execute()
+        get_calendar_service().events().delete(calendarId=user_calendar, eventId=events[0]["id"]).execute()
         return True, events[0]["summary"]
     return False, None

@@ -14,22 +14,33 @@ TODO_STATUS_DONE = "已完成"
 USER_STATUS_PENDING = "尚未綁定日曆"
 USER_STATUS_READY = "已綁定"
 
-client = gspread.service_account(filename=GOOGLE_KEY_PATH)
-SPREADSHEET = client.open_by_key(SHEET_ID)
+_client = None
+_spreadsheet = None
+
+
+def get_spreadsheet():
+    global _client, _spreadsheet
+    if _client is None:
+        _client = gspread.service_account(filename=GOOGLE_KEY_PATH)
+    if _spreadsheet is None:
+        _spreadsheet = _client.open_by_key(SHEET_ID)
+    return _spreadsheet
 
 
 def get_user_mapping_sheet():
+    spreadsheet = get_spreadsheet()
     try:
-        return SPREADSHEET.worksheet("User_Mapping")
+        return spreadsheet.worksheet("User_Mapping")
     except gspread.exceptions.WorksheetNotFound:
-        sheet = SPREADSHEET.add_worksheet(title="User_Mapping", rows="100", cols="5")
+        sheet = spreadsheet.add_worksheet(title="User_Mapping", rows="100", cols="5")
         sheet.append_row(["Name", "userId", "Calendar_ID", "Status"])
         return sheet
 
 
 def create_user_worksheet(name, u_id):
+    spreadsheet = get_spreadsheet()
     mapping_sheet = get_user_mapping_sheet()
-    new_ws = SPREADSHEET.add_worksheet(title=name, rows="100", cols="5")
+    new_ws = spreadsheet.add_worksheet(title=name, rows="100", cols="5")
     new_ws.append_row(["時間", "任務", "狀態"])
     mapping_sheet.append_row([name, u_id, "", USER_STATUS_PENDING])
     return new_ws
@@ -43,17 +54,17 @@ def update_user_calendar(u_id, calendar_id):
 
 
 def add_user_todo(user_name, timestamp, task):
-    u_worksheet = SPREADSHEET.worksheet(user_name)
+    u_worksheet = get_spreadsheet().worksheet(user_name)
     u_worksheet.append_row([timestamp, task, TODO_STATUS_PENDING])
 
 
 def get_user_todo_values(user_name):
-    u_worksheet = SPREADSHEET.worksheet(user_name)
+    u_worksheet = get_spreadsheet().worksheet(user_name)
     return u_worksheet.get_all_values()
 
 
 def update_or_delete_todo(user_name, num, action):
-    u_worksheet = SPREADSHEET.worksheet(user_name)
+    u_worksheet = get_spreadsheet().worksheet(user_name)
     rows = u_worksheet.get_all_values()
     target_idx, count = -1, 0
 

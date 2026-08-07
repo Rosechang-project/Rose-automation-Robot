@@ -29,7 +29,21 @@ HANDLER = get_line_handler()
 
 @app.get("/")
 async def home():
-    return {"status": "Rose 行程管理機器人運作中", "uptime": str(datetime.now(TZ))}
+    return {"status": "Rose scheduler bot is running", "uptime": str(datetime.now(TZ))}
+
+
+@app.get("/cron/status")
+async def cron_status(request: Request):
+    scheduler = getattr(request.app.state, "scheduler", None)
+    jobs = scheduler.get_jobs() if scheduler else []
+    reminder_job = jobs[0] if jobs else None
+    return {
+        "status": "ok",
+        "cron_secret_configured": bool(os.getenv("CRON_SECRET")),
+        "scheduler_running": bool(scheduler and scheduler.running),
+        "next_internal_reminder": str(reminder_job.next_run_time) if reminder_job else None,
+        "checked_at": str(datetime.now(TZ)),
+    }
 
 
 @app.post("/callback")
@@ -43,16 +57,28 @@ async def callback(request: Request):
     return "OK"
 
 
-@app.post("/cron/reminder")
-async def trigger_reminder(x_cron_secret: str | None = Header(default=None)):
+def verify_cron_secret(x_cron_secret: str | None):
     expected_secret = os.getenv("CRON_SECRET")
     if not expected_secret:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
     if x_cron_secret != expected_secret:
         raise HTTPException(status_code=403, detail="Invalid cron secret")
 
+
+async def run_reminder(x_cron_secret: str | None):
+    verify_cron_secret(x_cron_secret)
     summary = smart_reminder_job()
     return {"status": "triggered", "summary": summary, "triggered_at": str(datetime.now(TZ))}
+
+
+@app.get("/cron/reminder")
+async def trigger_reminder_get(x_cron_secret: str | None = Header(default=None)):
+    return await run_reminder(x_cron_secret)
+
+
+@app.post("/cron/reminder")
+async def trigger_reminder_post(x_cron_secret: str | None = Header(default=None)):
+    return await run_reminder(x_cron_secret)
 
 
 if __name__ == "__main__":

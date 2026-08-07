@@ -15,13 +15,20 @@ load_dotenv()
 
 LINE_CONF = Configuration(access_token=os.getenv("LINE_CHANNEL_ACCESS_TOKEN"))
 TZ = pytz.timezone("Asia/Taipei")
-CALENDAR_SERVICE = get_calendar_service()
 
 
 def smart_reminder_job():
     now = datetime.now(TZ)
-    users = get_user_mapping_sheet().get_all_records()
-    summary = {"users": len(users), "events": 0, "sent": 0, "skipped": 0, "errors": 0}
+    summary = {"users": 0, "events": 0, "sent": 0, "skipped": 0, "errors": 0}
+    try:
+        users = get_user_mapping_sheet().get_all_records()
+    except Exception as e:
+        summary["errors"] = 1
+        summary["reason"] = f"user mapping sheet failed: {e}"
+        print(f"[Scheduler Error] user mapping sheet failed: {e}")
+        return summary
+
+    summary["users"] = len(users)
     print(f"[Scheduler] reminder job started at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}; users={len(users)}")
 
     if now.hour == 8:
@@ -39,6 +46,14 @@ def smart_reminder_job():
         summary["reason"] = f"current hour {now.hour} is not a reminder hour"
         return summary
 
+    try:
+        calendar_service = get_calendar_service()
+    except Exception as e:
+        summary["errors"] = 1
+        summary["reason"] = f"calendar service failed: {e}"
+        print(f"[Scheduler Error] calendar service failed: {e}")
+        return summary
+
     for index, user in enumerate(users, start=1):
         u_id = user.get("userId")
         calendar_id = user.get("Calendar_ID")
@@ -48,7 +63,7 @@ def smart_reminder_job():
             continue
         try:
             events_res = (
-                CALENDAR_SERVICE.events()
+                calendar_service.events()
                 .list(
                     calendarId=calendar_id,
                     timeMin=start_dt.isoformat(),
