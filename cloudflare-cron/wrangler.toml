@@ -1,0 +1,12 @@
+name = "rose-cloudflare-cron"
+main = "src/index.js"
+compatibility_date = "2026-08-19"
+
+[vars]
+ROSE_BASE_URL = "https://rose-automation-robot.onrender.com"
+
+[triggers]
+crons = [
+  "*/10 * * * *",
+  "5 0,13 * * *"
+]

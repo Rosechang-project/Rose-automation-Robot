@@ -14,12 +14,19 @@ from services.line_service import get_line_handler
 load_dotenv()
 
 
+def internal_scheduler_enabled():
+    return os.getenv("ENABLE_INTERNAL_SCHEDULER", "false").lower() in {"1", "true", "yes", "on"}
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.scheduler = setup_scheduler()
-    app.state.scheduler.start()
+    app.state.scheduler = None
+    if internal_scheduler_enabled():
+        app.state.scheduler = setup_scheduler()
+        app.state.scheduler.start()
     yield
-    app.state.scheduler.shutdown()
+    if app.state.scheduler:
+        app.state.scheduler.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -40,6 +47,7 @@ async def cron_status(request: Request):
     return {
         "status": "ok",
         "cron_secret_configured": bool(os.getenv("CRON_SECRET")),
+        "internal_scheduler_enabled": internal_scheduler_enabled(),
         "scheduler_running": bool(scheduler and scheduler.running),
         "next_internal_reminder": str(reminder_job.next_run_time) if reminder_job else None,
         "checked_at": str(datetime.now(TZ)),
