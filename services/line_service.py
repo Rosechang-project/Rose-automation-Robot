@@ -176,21 +176,25 @@ def handle_calendar_command(user_msg, user_name, user_calendar):
         if not user_calendar:
             return "❌ 尚未設定日曆 ID，請先回傳 Gmail 帳號。"
 
-        current_year = datetime.now(TZ).year
+        now = datetime.now(TZ)
+        current_year = now.year
         hour_val, min_val = map(int, time_raw.split(":"))
         year = parsed_date.year if parsed_date.year != 1900 else current_year
         start_dt = TZ.localize(
             datetime(year=year, month=parsed_date.month, day=parsed_date.day, hour=hour_val, minute=min_val)
         )
+        if start_dt <= now:
+            return "❌ 這個時間已經過去了，請預約未來的時間。範例：預約 8/20 09:00 開會。"
+
         end_dt = start_dt + dt_module.timedelta(hours=1)
 
         if start_dt.hour < 12:
             reminder_base = (start_dt - dt_module.timedelta(days=1)).replace(hour=21, minute=0)
         else:
             reminder_base = start_dt.replace(hour=8, minute=0)
-        remind_min = int((start_dt - reminder_base).total_seconds() / 60)
+        remind_min = int((start_dt - max(reminder_base, now)).total_seconds() / 60)
 
-        current_time_str = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
+        current_time_str = now.strftime("%Y-%m-%d %H:%M:%S")
         insert_calendar_event(user_calendar, task_name, start_dt, end_dt, remind_min, current_time_str)
         return f"📅 {user_name} 預約成功：{task_name}"
     except Exception as e:
