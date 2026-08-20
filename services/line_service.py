@@ -184,7 +184,7 @@ def handle_calendar_command(user_msg, user_name, user_calendar):
             datetime(year=year, month=parsed_date.month, day=parsed_date.day, hour=hour_val, minute=min_val)
         )
         if start_dt <= now:
-            return "❌ 這個時間已經過去了，請預約未來的時間。範例：預約 8/20 09:00 開會。"
+            return "❌ 這個時間已經過去了，請預約未來時間的行程。"
 
         end_dt = start_dt + dt_module.timedelta(hours=1)
 
