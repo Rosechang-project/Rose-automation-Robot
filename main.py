@@ -2,10 +2,13 @@
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
+from secrets import compare_digest
 
 import pytz
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from linebot.v3.exceptions import InvalidSignatureError
 
 from scheduler import setup_scheduler, smart_reminder_job
@@ -24,9 +27,11 @@ async def lifespan(app: FastAPI):
     if internal_scheduler_enabled():
         app.state.scheduler = setup_scheduler()
         app.state.scheduler.start()
-    yield
-    if app.state.scheduler:
-        app.state.scheduler.shutdown()
+    try:
+        yield
+    finally:
+        if app.state.scheduler:
+            app.state.scheduler.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -57,10 +62,12 @@ async def cron_status(request: Request):
 @app.post("/callback")
 async def callback(request: Request):
     signature = request.headers.get("X-Line-Signature")
+    if not signature:
+        raise HTTPException(status_code=400, detail="Missing signature")
     body = await request.body()
     try:
-        HANDLER.handle(body.decode("utf-8"), signature)
-    except InvalidSignatureError:
+        await run_in_threadpool(HANDLER.handle, body.decode("utf-8"), signature)
+    except (InvalidSignatureError, UnicodeDecodeError):
         raise HTTPException(status_code=400, detail="Invalid signature")
     return "OK"
 
@@ -69,14 +76,23 @@ def verify_cron_secret(x_cron_secret: str | None):
     expected_secret = os.getenv("CRON_SECRET")
     if not expected_secret:
         raise HTTPException(status_code=503, detail="CRON_SECRET is not configured")
-    if x_cron_secret != expected_secret:
+    if not x_cron_secret or not compare_digest(x_cron_secret.encode(), expected_secret.encode()):
         raise HTTPException(status_code=403, detail="Invalid cron secret")
 
 
 async def run_reminder(x_cron_secret: str | None):
     verify_cron_secret(x_cron_secret)
-    summary = smart_reminder_job()
-    return {"status": "triggered", "summary": summary, "triggered_at": str(datetime.now(TZ))}
+    summary = await run_in_threadpool(smart_reminder_job)
+    if summary["errors"]:
+        status = "partial_failure" if summary["sent"] else "failed"
+        status_code = 503
+    else:
+        status = "skipped" if summary.get("reason") else "completed"
+        status_code = 200
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": status, "summary": summary, "triggered_at": datetime.now(TZ).isoformat()},
+    )
 
 
 @app.get("/cron/reminder")

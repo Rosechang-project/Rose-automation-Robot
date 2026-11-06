@@ -42,11 +42,26 @@ async function triggerReminder(baseUrl, env) {
     throw new Error("CRON_SECRET is not configured in Cloudflare Worker secrets.");
   }
 
-  await checkedFetch(`${baseUrl}/cron/reminder`, {
+  const url = `${baseUrl}/cron/reminder`;
+  const init = {
+    method: "POST",
     headers: {
       "X-Cron-Secret": env.CRON_SECRET,
     },
-  });
+  };
+
+  for (const delay of [1000, 3000]) {
+    try {
+      await checkedFetch(url, init);
+      return;
+    } catch (error) {
+      if (error.status && error.status < 500) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  await checkedFetch(url, init);
 }
 
 async function checkedFetch(url, init = {}) {
@@ -54,7 +69,9 @@ async function checkedFetch(url, init = {}) {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`${url} failed: ${response.status} ${body}`);
+    const error = new Error(`${url} failed: ${response.status} ${body}`);
+    error.status = response.status;
+    throw error;
   }
 
   return response;

@@ -26,6 +26,8 @@ The Worker replaces cron-job.org by calling Render on a schedule:
 - `*/10 * * * *` keeps Render awake every 10 minutes.
 - `5 0,13 * * *` triggers reminders at 08:05 and 21:05 Asia/Taipei.
 
+The reminder endpoint returns HTTP 503 when some or all of the work fails. The Worker retries server or network failures up to twice. The bot skips users whose push was already accepted by LINE for the same reminder window.
+
 Cloudflare cron expressions use UTC, so the reminder schedule is converted from Taiwan time:
 
 - 08:05 Asia/Taipei = 00:05 UTC

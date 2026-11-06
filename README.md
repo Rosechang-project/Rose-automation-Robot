@@ -11,7 +11,7 @@
 - 📝 待辦雜事：用 `新增` 把雜事記到 Google Sheets。
 - 📅 智慧預約：用 `預約` 把行程寫進 Google Calendar。
 - 🌹 查詢清單：一次看未完成待辦和近期行程。
-- ☀️ / 🌙 行程提醒：每天 08:00 和 21:00 用 LINE push message 提醒。
+- ☀️ / 🌙 行程提醒：預設每天 08:05 和 21:05 用 LINE push message 提醒。
 - 🕘 時區：全部使用 `Asia/Taipei`。
 
 ## 專案結構
@@ -80,7 +80,7 @@ https://你的公開網址/callback
 我是 Rose
 ```
 
-綁定 Google Calendar ID 或 Gmail：
+綁定 Google Calendar 前，請將日曆共用給 Bot 的 Google 服務帳號，並請管理者核准。核准後，在和 Bot 的一對一聊天中單獨傳送 Calendar ID，例如：
 
 ```text
 user@example.com
@@ -92,7 +92,7 @@ user@example.com
 新增 買牛奶、整理簡報
 ```
 
-新增 Google Calendar 行程：
+新增 Google Calendar 行程時，請先輸入日期和時間，再輸入標題：
 
 ```text
 預約 6/25 09:00 開會
@@ -104,14 +104,14 @@ user@example.com
 查詢
 ```
 
-完成或刪除第 1 筆未完成待辦：
+使用「查詢」顯示的固定編號完成或刪除待辦。新版編號以 `T` 開頭，編號可能跳號。如果舊訊息裡只顯示數字，請先重新查詢：
 
 ```text
-完成 1
-刪除 1
+完成 T1
+刪除 T1
 ```
 
-取消未來行程中第一筆標題包含關鍵字的事件：
+依標題搜尋要取消的未來行程。若找到多筆，Bot 會列出選項，請複製其中一筆的 `取消 ID …` 指令：
 
 ```text
 取消 開會
@@ -121,7 +121,7 @@ user@example.com
 
 Render 免費方案閒置時會睡著，所以需要外部 cron job 定期敲一下首頁。
 
-建議使用 cron-job.org，每 10 分鐘打一次：
+專案的 Cloudflare Worker 每 10 分鐘呼叫：
 
 ```text
 https://rose-automation-robot.onrender.com/
@@ -138,9 +138,7 @@ https://rose-automation-robot.onrender.com/
 21:00 檢查明天 00:00 到 11:59 的行程
 ```
 
-如果 Render 當時醒著，APScheduler 會自動送提醒。
-
-更保險的做法是另外設定一個外部 cron，在 `08:05` 和 `21:05` 主動呼叫提醒端點：
+預設由 Cloudflare 在 `08:05` 和 `21:05` 呼叫提醒端點，內部 APScheduler 預設關閉。部署方式請見 [CRON_SETUP.md](CRON_SETUP.md)。
 
 ```text
 POST https://rose-automation-robot.onrender.com/cron/reminder
@@ -154,7 +152,7 @@ Header: X-Cron-Secret: your_private_cron_secret
 系統會使用 `User_Mapping` 工作表紀錄使用者：
 
 ```text
-Name | userId | Calendar_ID | Status
+Name | userId | Calendar_ID | Status | Approved_Calendar_ID
 ```
 
 每位使用者會另外建立一張以使用者名稱命名的工作表：
@@ -162,6 +160,10 @@ Name | userId | Calendar_ID | Status
 ```text
 時間 | 任務 | 狀態
 ```
+
+既有試算表請在 `User_Mapping!E1` 加上 `Approved_Calendar_ID`，並由管理者在 E 欄逐列填入已確認授權的日曆 ID。C 欄與 E 欄一致時，原本的綁定可以繼續使用。E 欄留白或兩欄不同時，該帳號的日曆功能會停用，待辦照常可用。
+
+試算表編輯權限應限於管理者與 Bot 的 Google 服務帳號。請保留隱藏的 `_Bot_State` 工作表及 `Bot_claim_` 開頭的命名範圍，這些用於辨識重送指令和提醒。個人工作表的資料列對應固定待辦編號，請避免手動排序、插入或刪除資料列。
 
 ## 資料儲存設計
 
