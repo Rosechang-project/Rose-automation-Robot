@@ -92,21 +92,29 @@ class LineCommandsTest(unittest.TestCase):
             self.assertIsNone(line_service.message_reply(message("刪除 T1")))
             update.assert_called_once_with("rose", 1, "刪除", "webhook:event")
 
-    def test_legacy_todo_numbers_cannot_modify_a_different_task(self):
+    def test_todo_display_numbers_restart_and_confirmation_keeps_the_selected_task(self):
         self.users[0]["Approved_Calendar_ID"] = ""
         with (
-            patch.object(line_service, "get_open_todos", return_value=[(1, "A"), (3, "C"), (4, "D")]),
-            patch.object(line_service, "update_or_delete_todo", return_value=(True, "D")) as update,
+            patch.object(line_service, "get_open_todos", return_value=[(1200, "A"), (1500, "B")]) as todos,
+            patch.object(line_service, "update_or_delete_todo", return_value=(True, "B")) as update,
         ):
             listing = line_service.message_reply(message("查詢"))
-            self.assertIn("T3. ⏳ C", listing)
-            self.assertIn("T4. ⏳ D", listing)
-            for command in ("刪除 3", "完成 3"):
-                with self.subTest(command=command):
-                    self.assertIn("重新輸入「查詢」", line_service.message_reply(message(command)))
+            self.assertIn("1. ⏳ A\n2. ⏳ B", listing)
+            self.assertNotIn("1500", listing)
+
+            confirm = line_service.message_reply(message("刪除 2", event_id="selection"))
+            self.assertIn("\nB\n", confirm.text)
+            action = confirm.quick_reply.items[0].action
+            self.assertEqual(action.text, "刪除 T1500")
+            self.assertIn("重新查詢", line_service.message_reply(message("完成 3")))
             update.assert_not_called()
-            self.assertIn("已刪除：D", line_service.message_reply(message("刪除 T4")))
-            update.assert_called_once_with("rose", 4, "刪除", "webhook:event")
+
+            todos.return_value = [(1500, "B"), (1501, "C")]
+            self.assertIn("已刪除：B", line_service.message_reply(message(action.text)))
+            update.assert_called_once_with("rose", 1500, "刪除", "webhook:event")
+
+            todos.return_value = [(1501, "C")]
+            self.assertIn("1. ⏳ C", line_service.message_reply(message("查詢")))
 
     def test_booking_uses_only_leading_date_and_time(self):
         with (

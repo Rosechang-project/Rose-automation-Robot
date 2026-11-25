@@ -11,7 +11,16 @@ from uuid import NAMESPACE_URL, uuid5
 import pytz
 from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
-from linebot.v3.messaging import ApiClient, Configuration, MessagingApi, ReplyMessageRequest, TextMessage
+from linebot.v3.messaging import (
+    ApiClient,
+    Configuration,
+    MessageAction,
+    MessagingApi,
+    QuickReply,
+    QuickReplyItem,
+    ReplyMessageRequest,
+    TextMessage,
+)
 from linebot.v3.webhooks import FollowEvent, MessageEvent, TextMessageContent
 
 from services.calendar_service import (
@@ -50,10 +59,12 @@ def get_line_handler():
     return HANDLER
 
 
-def reply(reply_token, text):
+def reply(reply_token, message):
+    if isinstance(message, str):
+        message = TextMessage(text=message)
     with ApiClient(LINE_CONF) as api_client:
         MessagingApi(api_client).reply_message(
-            ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text)])
+            ReplyMessageRequest(reply_token=reply_token, messages=[message])
         )
 
 
@@ -73,8 +84,8 @@ def handle_follow(event):
 新增 買牛奶、整理簡報
 預約 6/25 09:00 開會
 查詢
-完成 T1
-刪除 T1
+完成 1
+刪除 1
 取消 開會"""
     reply(event.reply_token, welcome_msg)
 
@@ -87,12 +98,12 @@ def handle_message(event):
     # Serialize spreadsheet read/modify/write sequences within this process.
     with _webhook_lock:
         try:
-            reply_text = message_reply(event)
+            response = message_reply(event)
         except Exception:
             LOGGER.exception("LINE command failed")
             raise
-    if reply_text:
-        reply(event.reply_token, reply_text)
+    if response:
+        reply(event.reply_token, response)
 
 
 def message_reply(event):
@@ -139,13 +150,7 @@ def message_reply(event):
     if first_matching_prefix(user_msg, ["新增", "待辦"]):
         return handle_todo_command(user_msg, user_name, event_key)
     if user_msg.startswith(("完成", "刪除")):
-        action = user_msg[:2]
-        id_match = re.fullmatch(r"[Tt]([1-9][0-9]{0,9})", user_msg[2:].strip())
-        if not id_match:
-            return f"❌ 請重新輸入「查詢」，再使用清單上的編號，例如：{action} T1"
-        todo_id = int(id_match[1])
-        success, task_title = update_or_delete_todo(user_name, todo_id, action, event_key)
-        return f"✅ 已{action}：{task_title}" if success else f"🧐 找不到編號 T{todo_id}"
+        return handle_todo_update(user_msg, user_name, event_key)
     if user_msg.startswith("取消"):
         return handle_cancel_command(user_msg[2:].strip(), user_calendar, event_key, stored)
 
@@ -288,9 +293,38 @@ def handle_todo_command(user_msg, user_name, event_key):
     return f"✅ 已為 {user_name} 記錄雜事。"
 
 
+def handle_todo_update(user_msg, user_name, event_key):
+    action = user_msg[:2]
+    selection = re.fullmatch(r"(?P<stable>[Tt])?(?P<number>[1-9][0-9]{0,9})", user_msg[2:].strip())
+    if not selection:
+        return f"❌ 請重新輸入「查詢」，再使用清單上的編號，例如：{action} 1"
+
+    number = int(selection["number"])
+    if selection["stable"]:
+        success, title = update_or_delete_todo(user_name, number, action, event_key)
+        if success:
+            return f"✅ 已{action}：{title}"
+        return "🧐 找不到這筆未完成待辦，請重新查詢。"
+
+    todos = get_open_todos(user_name)
+    if number > len(todos):
+        return f"🧐 找不到編號 {number}，請重新查詢。"
+
+    # The confirmation targets the selected row even if the list changes.
+    todo_id, title = todos[number - 1]
+    command = f"{action} T{todo_id}"
+    preview = title if len(title) <= 200 else f"{title[:200]}…"
+    return TextMessage(
+        text=f"要{action}這筆待辦嗎？\n{preview}\n\n請按下「確認{action}」，或輸入「{command}」。",
+        quick_reply=QuickReply(items=[
+            QuickReplyItem(action=MessageAction(label=f"確認{action}", text=command)),
+        ]),
+    )
+
+
 def handle_query_command(user_name, user_calendar):
     combined_reply = f"🌹 {user_name} 的最新情報：\n"
-    sheet_tasks = [f"T{todo_id}. ⏳ {title}" for todo_id, title in get_open_todos(user_name)]
+    sheet_tasks = [f"{number}. ⏳ {title}" for number, (_, title) in enumerate(get_open_todos(user_name), 1)]
     combined_reply += "\n📝 【待辦雜事】\n" + ("\n".join(sheet_tasks) or "目前沒有雜事喔！")
 
     if user_calendar:
@@ -307,5 +341,5 @@ def handle_query_command(user_name, user_calendar):
 
     return (
         f"{combined_reply}\n{'-' * 15}\n💡 指令小幫手：\n"
-        "🗑️ 刪除雜事：刪除 T1\n❌ 取消行程：取消 [關鍵字]"
+        "✅ 完成 1｜🗑️ 刪除 1（先確認待辦名稱）\n❌ 取消行程：取消 [關鍵字]"
     )

@@ -41,7 +41,11 @@ HANDLER = get_line_handler()
 
 @app.get("/")
 async def home():
-    return {"status": "Rose scheduler bot is running", "uptime": str(datetime.now(TZ))}
+    return {
+        "status": "Rose scheduler bot is running",
+        "uptime": str(datetime.now(TZ)),
+        "version": os.getenv("RENDER_GIT_COMMIT", "local"),
+    }
 
 
 @app.get("/cron/status")
