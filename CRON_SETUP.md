@@ -26,7 +26,9 @@ The Worker replaces cron-job.org by calling Render on a schedule:
 - `*/10 * * * *` keeps Render awake every 10 minutes.
 - `5 0,13 * * *` triggers reminders at 08:05 and 21:05 Asia/Taipei.
 
-The reminder endpoint returns HTTP 503 when some or all of the work fails. The Worker retries server or network failures up to twice. The bot skips users whose push was already accepted by LINE for the same reminder window.
+The reminder endpoint returns HTTP 503 when some or all of the work fails. Both keep-alive and reminder requests have a 75-second timeout and retry server or network failures up to twice, after 5 and 15 seconds. Keep-alive also checks the bot's JSON health response so a cold-start HTML page triggers a retry. The bot skips users whose push was already accepted by LINE for the same reminder window.
+
+Workers Logs records each attempt's result, HTTP status and elapsed time. Observability is enabled in the Worker configuration. Response bodies and the cron secret are omitted from HTTP error logs.
 
 Cloudflare cron expressions use UTC, so the reminder schedule is converted from Taiwan time:
 

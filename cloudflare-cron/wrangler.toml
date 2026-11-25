@@ -2,6 +2,10 @@ name = "rose-cloudflare-cron"
 main = "src/index.js"
 compatibility_date = "2026-08-19"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 ROSE_BASE_URL = "https://rose-automation-robot.onrender.com"
 
